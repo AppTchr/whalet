@@ -52,7 +52,8 @@ export class WalletMembersService {
             ? {
                 userId: existingUser.id,
                 status: 'active',
-                invitedEmail: email,
+                // FIX M5: don't store invitedEmail for registered users — PII not needed
+                invitedEmail: null,
               }
             : {
                 userId: null,
@@ -89,8 +90,9 @@ export class WalletMembersService {
   }
 
   async ensureNotLastOwner(walletId: string, targetMemberId: string): Promise<void> {
-    const targetMember = await this.prisma.walletMember.findUnique({
-      where: { id: targetMemberId },
+    // FIX L2: scope lookup to walletId to prevent cross-wallet confusion
+    const targetMember = await this.prisma.walletMember.findFirst({
+      where: { id: targetMemberId, walletId },
       select: { role: true, status: true },
     });
 
@@ -127,8 +129,9 @@ export class WalletMembersService {
       await this.ensureNotLastOwner(walletId, memberId);
     }
 
+    // FIX C1: include walletId in where to prevent cross-wallet write
     const updated = await this.prisma.walletMember.update({
-      where: { id: memberId },
+      where: { id: memberId, walletId },
       data: { role: dto.role },
     });
 
@@ -144,12 +147,31 @@ export class WalletMembersService {
       throw new NotFoundException('MEMBER_NOT_FOUND');
     }
 
-    await this.ensureNotLastOwner(walletId, memberId);
+    // FIX M3: prevent silent revokedAt overwrite on already-revoked member
+    if (member.status === 'revoked') {
+      throw new UnprocessableEntityException('MEMBER_ALREADY_REVOKED');
+    }
 
-    await this.prisma.walletMember.update({
-      where: { id: memberId },
-      data: { status: 'revoked', revokedAt: new Date() },
-    });
+    // FIX C2: wrap last-owner check + update in a serializable transaction
+    // to prevent race condition where two concurrent requests both revoke owners
+    await this.prisma.$transaction(
+      async (tx) => {
+        const ownerCount = await tx.walletMember.count({
+          where: { walletId, role: 'owner', status: 'active' },
+        });
+
+        if (member.role === 'owner' && ownerCount <= 1) {
+          throw new UnprocessableEntityException('LAST_OWNER_CANNOT_BE_REVOKED');
+        }
+
+        // FIX C1: include walletId in where to prevent cross-wallet write
+        await tx.walletMember.update({
+          where: { id: memberId, walletId },
+          data: { status: 'revoked', revokedAt: new Date() },
+        });
+      },
+      { isolationLevel: 'Serializable' },
+    );
   }
 
   async activatePendingInvitesByEmail(
@@ -165,6 +187,8 @@ export class WalletMembersService {
       data: {
         userId,
         status: 'active',
+        // FIX M5: clear invitedEmail once identity is resolved — no lingering PII
+        invitedEmail: null,
       },
     });
   }
@@ -179,12 +203,17 @@ export class WalletMembersService {
   // ---------------------------------------------------------------------------
 
   private toDto(member: WalletMember): MemberResponseDto {
+    // FIX H2: normalize status — 'invited' becomes 'pending' externally so the
+    // API never reveals whether the invited email is registered in the system
+    const externalStatus: 'active' | 'pending' | 'revoked' =
+      member.status === 'invited' ? 'pending' : member.status;
+
     return {
       id: member.id,
       walletId: member.walletId,
       userId: member.userId,
       role: member.role,
-      status: member.status,
+      status: externalStatus,
       invitedEmail: member.invitedEmail,
       invitedByUserId: member.invitedByUserId,
       invitedAt: member.invitedAt,

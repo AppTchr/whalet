@@ -6,6 +6,7 @@ import {
   MaxLength,
   IsNumber,
   Min,
+  Matches,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { WalletType } from '@prisma/client';
@@ -38,6 +39,8 @@ export class CreateWalletDto {
   @IsOptional()
   @IsString()
   @MaxLength(10)
+  // FIX H4: enforce ISO 4217 format — 3 to 10 uppercase letters only
+  @Matches(/^[A-Z]{3,10}$/, { message: 'currencyCode must be 3–10 uppercase letters (e.g. BRL, USD)' })
   currencyCode?: string;
 
   @ApiPropertyOptional({

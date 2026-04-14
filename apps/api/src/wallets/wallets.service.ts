@@ -15,7 +15,7 @@ import {
   ArchiveWalletResponseDto,
 } from './dto/wallet-response.dto';
 import { IBalanceService, BALANCE_SERVICE } from './balance/balance.interface';
-import { WalletMemberRole } from '@prisma/client';
+import { WalletMemberRole, WalletType } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 
 export interface CanArchiveResult {
@@ -147,6 +147,7 @@ export class WalletsService {
   async update(
     walletId: string,
     dto: UpdateWalletDto,
+    callerRole: WalletMemberRole = 'owner',
   ): Promise<WalletDetailDto> {
     const wallet = await this.prisma.wallet.findUnique({
       where: { id: walletId },
@@ -174,9 +175,10 @@ export class WalletsService {
     const balances = await this.balanceService.getBatchBalances([walletId]);
     const balance = balances.get(walletId);
 
+    // FIX H3: use actual caller role, not hardcoded 'owner'
     return this.toDetailDto(
       updated,
-      'owner',
+      callerRole,
       balance?.settled ?? new Decimal(0),
       balance?.projected ?? new Decimal(0),
       updated._count.members,
@@ -205,6 +207,11 @@ export class WalletsService {
       throw new NotFoundException('WALLET_NOT_FOUND');
     }
 
+    // FIX M1: prevent silent timestamp overwrite on already-archived wallet
+    if (wallet.isArchived) {
+      throw new UnprocessableEntityException('WALLET_ALREADY_ARCHIVED');
+    }
+
     const updated = await this.prisma.wallet.update({
       where: { id: walletId },
       data: { isArchived: true, archivedAt: new Date() },
@@ -220,6 +227,11 @@ export class WalletsService {
 
     if (!wallet) {
       throw new NotFoundException('WALLET_NOT_FOUND');
+    }
+
+    // FIX M2: prevent silent no-op on non-archived wallet
+    if (!wallet.isArchived) {
+      throw new UnprocessableEntityException('WALLET_NOT_ARCHIVED');
     }
 
     const updated = await this.prisma.wallet.update({

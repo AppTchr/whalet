@@ -93,9 +93,11 @@ export class WalletsController {
   @ApiResponse({ status: 404, description: 'Carteira não encontrada.' })
   async update(
     @Param('walletId') walletId: string,
+    @ActiveMember() member: ActiveMemberPayload,
     @Body() dto: UpdateWalletDto,
   ): Promise<WalletDetailDto> {
-    return this.walletsService.update(walletId, dto);
+    // FIX H3: pass actual caller role instead of hardcoding 'owner'
+    return this.walletsService.update(walletId, dto, member.role);
   }
 
   @Post(':walletId/archive')

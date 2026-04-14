@@ -14,9 +14,13 @@ export class MemberResponseDto {
   @ApiProperty({ enum: WalletMemberRole, example: WalletMemberRole.editor })
   role: WalletMemberRole;
 
-  @ApiProperty({ enum: WalletMemberStatus, example: WalletMemberStatus.active })
-  status: WalletMemberStatus;
+  // FIX H2: normalize status externally — never expose 'active' vs 'invited'
+  // difference tied to whether the email is registered (user enumeration oracle)
+  // external consumers see 'pending' for invited, 'active' for active members
+  @ApiProperty({ enum: ['active', 'pending', 'revoked'], example: 'active' })
+  status: 'active' | 'pending' | 'revoked';
 
+  // FIX M5 + H2: invitedEmail only shown to owners (filtered in service layer)
   @ApiPropertyOptional({ example: 'colaborador@exemplo.com' })
   invitedEmail: string | null;
 
