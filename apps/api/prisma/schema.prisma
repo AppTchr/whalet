@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// Auth Domain
+// =============================================================================
+
+model User {
+  id          String      @id @default(uuid())
+  email       String      @unique
+  status      UserStatus  @default(active)
+  lastLoginAt DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  otps        UserOtp[]
+  sessions    AuthSession[]
+
+  @@map("users")
+}
+
+model UserOtp {
+  id        String    @id @default(uuid())
+  userId    String?
+  email     String
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  attempts  Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([email])
+  @@index([tokenHash])
+  @@index([expiresAt])
+  @@map("user_otps")
+}
+
+model AuthSession {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  lastSeenAt DateTime?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("auth_sessions")
+}
+
+enum UserStatus {
+  active
+  inactive
+  blocked
+}

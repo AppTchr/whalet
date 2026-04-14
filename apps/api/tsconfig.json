@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    // NestJS DTOs use class properties without constructors — disable this specific strict check
+    "strictPropertyInitialization": false
+  }
+}

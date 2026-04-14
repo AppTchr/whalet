@@ -1,0 +1,26 @@
+{
+  "name": "ledger",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @ledger/api start:dev",
+    "build": "pnpm --filter @ledger/api build",
+    "build:api": "pnpm --filter @ledger/api build",
+    "build:web": "pnpm --filter @ledger/web build",
+    "lint": "pnpm --filter @ledger/api lint",
+    "test": "pnpm --filter @ledger/api test",
+    "typecheck": "pnpm --filter @ledger/api exec tsc --noEmit",
+    "prisma:generate": "pnpm --filter @ledger/api prisma:generate",
+    "prisma:migrate": "pnpm --filter @ledger/api prisma:migrate",
+    "prisma:migrate:deploy": "pnpm --filter @ledger/api prisma:migrate:deploy",
+    "prisma:seed": "pnpm --filter @ledger/api prisma:seed",
+    "prisma:studio": "pnpm --filter @ledger/api prisma:studio",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "env:setup": "cp .env.example .env && ln -sf ../../.env apps/api/.env && echo 'Done: .env created and apps/api/.env symlinked'"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}
