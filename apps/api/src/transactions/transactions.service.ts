@@ -56,8 +56,13 @@ export class TransactionsService {
       throw new UnprocessableEntityException('TRANSACTION_INVALID_INITIAL_STATUS');
     }
 
-    // Rule 2: transfer_in cannot be created directly
-    if (dto.type === TransactionType.transfer_in) {
+    // Rule 2: some types are managed by the cards domain and cannot be created directly
+    const nonDirectTypes: TransactionType[] = [
+      TransactionType.transfer_in,
+      TransactionType.credit_card_purchase,
+      TransactionType.credit_card_refund,
+    ];
+    if (nonDirectTypes.includes(dto.type)) {
       throw new UnprocessableEntityException('TRANSACTION_TYPE_NOT_DIRECTLY_CREATABLE');
     }
 
@@ -471,6 +476,7 @@ export class TransactionsService {
       transfer_out: -1,
       credit_card_purchase: 0,
       invoice_payment: -1,
+      credit_card_refund: 0,
     };
     return signs[type];
   }

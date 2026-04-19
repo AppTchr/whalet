@@ -11,6 +11,8 @@ import { BalanceModule } from './balance/balance.module';
 import { CategoriesModule } from './categories/categories.module';
 import { BankAccountsModule } from './bank-accounts/bank-accounts.module';
 import { TransactionsModule } from './transactions/transactions.module';
+import { CardsModule } from './cards/cards.module';
+import { FaturasModule } from './faturas/faturas.module';
 import appConfig from './config/app.config';
 
 @Module({
@@ -37,6 +39,8 @@ import appConfig from './config/app.config';
     CategoriesModule,
     BankAccountsModule,
     TransactionsModule,
+    CardsModule,
+    FaturasModule,
   ],
 })
 export class AppModule {}

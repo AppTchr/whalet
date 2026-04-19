@@ -112,6 +112,9 @@ model Wallet {
   categories   Category[]
   bankAccounts BankAccount[]
   transactions Transaction[]
+  creditCards  CreditCard[]
+  faturas      Fatura[]
+  installments Installment[]
 
   @@index([ownerUserId])
   @@index([isArchived])
@@ -155,6 +158,7 @@ enum TransactionType {
   transfer_out
   credit_card_purchase
   invoice_payment
+  credit_card_refund
 }
 
 enum TransactionStatus {
@@ -189,8 +193,9 @@ model Category {
   createdAt  DateTime     @default(now())
   updatedAt  DateTime     @updatedAt
 
-  wallet       Wallet        @relation(fields: [walletId], references: [id])
+  wallet       Wallet               @relation(fields: [walletId], references: [id])
   transactions Transaction[]
+  purchases    CreditCardPurchase[]
 
   @@unique([walletId, name])
   @@index([walletId])
@@ -236,10 +241,119 @@ model Transaction {
   wallet      Wallet       @relation(fields: [walletId], references: [id])
   category    Category?    @relation(fields: [categoryId], references: [id])
   bankAccount BankAccount? @relation(fields: [bankAccountId], references: [id])
+  invoicePaymentFatura Fatura? @relation("FaturaPaymentTx")
 
   @@index([walletId, status])
   @@index([walletId, dueDate])
   @@index([walletId, type])
   @@index([transferGroupId])
   @@map("transactions")
+}
+
+// =============================================================================
+// Credit Cards Domain
+// =============================================================================
+
+enum InstallmentStatus {
+  pending
+  paid
+  canceled
+}
+
+enum PurchaseStatus {
+  active
+  canceled
+}
+
+model CreditCard {
+  id               String   @id @default(uuid())
+  walletId         String
+  name             String   @db.VarChar(150)
+  closingDay       Int
+  dueDay           Int
+  creditLimitCents Int?
+  isArchived       Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  wallet    Wallet               @relation(fields: [walletId], references: [id])
+  faturas   Fatura[]
+  purchases CreditCardPurchase[]
+
+  @@index([walletId])
+  @@index([walletId, isArchived])
+  @@map("credit_cards")
+}
+
+model Fatura {
+  id                 String    @id @default(uuid())
+  cardId             String
+  walletId           String
+  referenceMonth     String    @db.VarChar(7)
+  closingDate        DateTime  @db.Date
+  dueDate            DateTime  @db.Date
+  invoicePaymentTxId String?   @unique
+  paidAt             DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  card             CreditCard    @relation(fields: [cardId], references: [id])
+  wallet           Wallet        @relation(fields: [walletId], references: [id])
+  invoicePaymentTx Transaction?  @relation("FaturaPaymentTx", fields: [invoicePaymentTxId], references: [id])
+  installments     Installment[]
+
+  @@unique([cardId, referenceMonth])
+  @@index([walletId, cardId])
+  @@index([cardId, dueDate])
+  @@map("faturas")
+}
+
+model CreditCardPurchase {
+  id               String         @id @default(uuid())
+  cardId           String
+  walletId         String
+  description      String         @db.VarChar(255)
+  totalAmountCents Int
+  installmentCount Int
+  purchaseDate     DateTime       @db.Date
+  categoryId       String?
+  notes            String?        @db.Text
+  status           PurchaseStatus @default(active)
+  canceledAt       DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  card         CreditCard    @relation(fields: [cardId], references: [id])
+  category     Category?     @relation(fields: [categoryId], references: [id])
+  installments Installment[]
+
+  @@index([walletId, cardId])
+  @@index([walletId, status])
+  @@index([cardId, purchaseDate])
+  @@map("credit_card_purchases")
+}
+
+model Installment {
+  id                String            @id @default(uuid())
+  purchaseId        String
+  faturaId          String
+  cardId            String
+  walletId          String
+  installmentNumber Int
+  amountCents       Int
+  dueDate           DateTime          @db.Date
+  status            InstallmentStatus @default(pending)
+  paidAt            DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  purchase CreditCardPurchase @relation(fields: [purchaseId], references: [id])
+  fatura   Fatura             @relation(fields: [faturaId], references: [id])
+  wallet   Wallet             @relation(fields: [walletId], references: [id])
+
+  @@index([purchaseId])
+  @@index([faturaId, status])
+  @@index([cardId, status])
+  @@index([walletId, status])
+  @@map("installments")
 }
