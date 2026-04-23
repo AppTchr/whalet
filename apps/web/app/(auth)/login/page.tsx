@@ -100,23 +100,33 @@ export default function LoginPage() {
   return (
     <Card className="shadow-lg border-neutral-border">
       <CardHeader className="space-y-1 pb-6">
-        <div className="mb-2">
-          <Image src="/icon.png" width={400} height={120} alt="whalet" className="w-full h-auto" />
-        </div>
+        <Image
+          src="/icon.png"
+          width={400}
+          height={120}
+          alt="whalet"
+          className="w-full h-auto"
+        />
 
         {step === "email" ? (
           <>
-            <CardTitle className="text-2xl font-bold">Bem-vindo(a) de volta</CardTitle>
+            <CardTitle className="text-2xl font-bold -mt-[50px]">
+              Bem-vindo(a) de volta
+            </CardTitle>
             <CardDescription>
               Informe seu e-mail para receber um código de acesso
             </CardDescription>
           </>
         ) : (
           <>
-            <CardTitle className="text-2xl font-bold">Verifique seu e-mail</CardTitle>
+            <CardTitle className="text-2xl font-bold">
+              Verifique seu e-mail
+            </CardTitle>
             <CardDescription>
               Enviamos um código de 6 dígitos para{" "}
-              <span className="font-medium text-foreground">{emailAddress}</span>
+              <span className="font-medium text-foreground">
+                {emailAddress}
+              </span>
             </CardDescription>
           </>
         )}
@@ -140,7 +150,7 @@ export default function LoginPage() {
                   autoFocus
                   className={cn(
                     "pl-10 w-full",
-                    emailForm.formState.errors.email && "border-destructive"
+                    emailForm.formState.errors.email && "border-destructive",
                   )}
                   {...emailForm.register("email")}
                 />
@@ -186,7 +196,7 @@ export default function LoginPage() {
                   inputMode="numeric"
                   className={cn(
                     "pl-10 text-center tracking-widest text-lg font-mono w-full",
-                    otpForm.formState.errors.token && "border-destructive"
+                    otpForm.formState.errors.token && "border-destructive",
                   )}
                   {...otpForm.register("token")}
                 />

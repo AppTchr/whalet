@@ -63,10 +63,10 @@ COPY --from=builder /app/apps/api/dist ./apps/api/dist
 # Copy Prisma schema + migrations (needed by prisma migrate deploy at startup)
 COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
 
-# Copy generated Prisma client binaries (created by prisma generate in builder)
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-
+# Generate Prisma client inside the production image so we don't depend on
+# pnpm's internal store layout between stages.
 WORKDIR /app/apps/api
+RUN pnpm prisma:generate
 
 EXPOSE 3000
 

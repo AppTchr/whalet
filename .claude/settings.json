@@ -15,7 +15,11 @@
       "Bash(pnpm c:*)",
       "Bash(pnpm env:*)",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d, indent=2\\)\\)\")",
-      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k: d[k] for k in ['scripts'] if k in d}, indent=2\\)\\)\")"
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k: d[k] for k in ['scripts'] if k in d}, indent=2\\)\\)\")",
+      "Bash(pnpm prisma:migrate)",
+      "Bash(pnpm prisma:migrate:deploy)",
+      "Bash(kill 15944 15969 16003)",
+      "Bash(PGPASSWORD=ledger psql -h localhost -U ledger -d ledger -c \"\\\\dt public.*\")"
     ],
     "deny": [
       "Bash(rm -rf /)",
