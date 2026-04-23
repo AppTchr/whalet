@@ -64,10 +64,14 @@ async function bootstrap() {
     res.json(document);
   });
 
+  app.use("/health", (_req: any, res: any) => {
+    res.status(200).json({ status: "ok" });
+  });
+
   const port = process.env.PORT ?? 3000;
-  await app.listen(port);
-  console.log(`Whalet API running on port ${port}`);
-  console.log(`Docs available at http://localhost:${port}/docs`);
+  await app.listen(port, "0.0.0.0");
+  console.log(`Whalet API running on 0.0.0.0:${port}`);
+  console.log(`Docs available at http://0.0.0.0:${port}/docs`);
 }
 
 bootstrap();
