@@ -20,9 +20,9 @@ const config: Config = {
     extend: {
       colors: {
         brand: {
-          primary: "#4F46E5",
-          "primary-50": "#EEF2FF",
-          "primary-100": "#E0E7FF",
+          primary: "#1E72DB",
+          "primary-50": "#EEF5FF",
+          "primary-100": "#DBEAFE",
           "primary-foreground": "#FFFFFF",
         },
         neutral: {

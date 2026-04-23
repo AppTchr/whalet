@@ -94,8 +94,14 @@ export class TransactionsController {
     @Param('walletId') walletId: string,
     @Param('transactionId') transactionId: string,
     @Body() dto: UpdateTransactionDto,
+    @Query('applyToFollowing') applyToFollowing?: string,
   ): Promise<TransactionResponseDto> {
-    return this.transactionsService.update(walletId, transactionId, dto);
+    return this.transactionsService.update(
+      walletId,
+      transactionId,
+      dto,
+      applyToFollowing === 'true',
+    );
   }
 
   @Post(':transactionId/pay')
@@ -127,8 +133,13 @@ export class TransactionsController {
   async cancel(
     @Param('walletId') walletId: string,
     @Param('transactionId') transactionId: string,
+    @Query('applyToFollowing') applyToFollowing?: string,
   ): Promise<TransactionResponseDto> {
-    return this.transactionsService.cancel(walletId, transactionId);
+    return this.transactionsService.cancel(
+      walletId,
+      transactionId,
+      applyToFollowing === 'true',
+    );
   }
 
   @Delete(':transactionId')

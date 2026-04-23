@@ -55,5 +55,43 @@
   }
   body {
     @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* ─── Stagger animation utility ──────────────────────────────────────────── */
+@layer utilities {
+  .fill-mode-both {
+    animation-fill-mode: both;
+  }
+
+  /* Stagger delays for list items */
+  .stagger-1  { animation-delay: 60ms;  animation-fill-mode: both; }
+  .stagger-2  { animation-delay: 120ms; animation-fill-mode: both; }
+  .stagger-3  { animation-delay: 180ms; animation-fill-mode: both; }
+  .stagger-4  { animation-delay: 240ms; animation-fill-mode: both; }
+  .stagger-5  { animation-delay: 300ms; animation-fill-mode: both; }
+  .stagger-6  { animation-delay: 360ms; animation-fill-mode: both; }
+  .stagger-7  { animation-delay: 420ms; animation-fill-mode: both; }
+  .stagger-8  { animation-delay: 480ms; animation-fill-mode: both; }
+
+  /* Card hover lift */
+  .card-hover {
+    @apply transition-all duration-200;
+  }
+  .card-hover:hover {
+    @apply shadow-md -translate-y-0.5;
+  }
+
+  /* Reduce all motion for accessibility */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }

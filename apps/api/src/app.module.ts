@@ -11,8 +11,10 @@ import { BalanceModule } from './balance/balance.module';
 import { CategoriesModule } from './categories/categories.module';
 import { BankAccountsModule } from './bank-accounts/bank-accounts.module';
 import { TransactionsModule } from './transactions/transactions.module';
+import { RecurringTransactionsModule } from './recurring-transactions/recurring-transactions.module';
 import { CardsModule } from './cards/cards.module';
 import { FaturasModule } from './faturas/faturas.module';
+import { BudgetsModule } from './budgets/budgets.module';
 import appConfig from './config/app.config';
 
 @Module({
@@ -39,8 +41,10 @@ import appConfig from './config/app.config';
     CategoriesModule,
     BankAccountsModule,
     TransactionsModule,
+    RecurringTransactionsModule,
     CardsModule,
     FaturasModule,
+    BudgetsModule,
   ],
 })
 export class AppModule {}

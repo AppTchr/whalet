@@ -116,8 +116,40 @@ export interface Transaction {
   categoryId: string | null;
   bankAccountId: string | null;
   transferGroupId: string | null;
+  recurrenceId: string | null;
+  recurrenceIndex: number | null;
   createdAt: string;
   updatedAt: string;
+}
+
+// ─── Recurring Transactions ───────────────────────────────────────────────────
+
+export type RecurrenceFrequency = "daily" | "weekly" | "biweekly" | "monthly";
+export type RecurringTransactionType = "income" | "expense";
+
+export interface RecurringTransaction {
+  id: string;
+  walletId: string;
+  type: RecurringTransactionType;
+  frequency: RecurrenceFrequency;
+  description: string;
+  amount: number;
+  startDate: string;
+  endDate: string | null;
+  maxOccurrences: number | null;
+  categoryId: string | null;
+  bankAccountId: string | null;
+  notes: string | null;
+  isActive: boolean;
+  lastGeneratedDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+  upcomingOccurrences?: Transaction[];
+}
+
+export interface RecurringTransactionListResponse {
+  recurringTransactions: RecurringTransaction[];
+  total: number;
 }
 
 // ─── Credit Cards ─────────────────────────────────────────────────────────────
@@ -341,6 +373,29 @@ export interface UpdateTransactionDto {
   notes?: string;
 }
 
+export interface CreateRecurringTransactionDto {
+  type: RecurringTransactionType;
+  frequency: RecurrenceFrequency;
+  description: string;
+  amount: number;
+  startDate: string;
+  endDate?: string;
+  maxOccurrences?: number;
+  categoryId?: string;
+  bankAccountId?: string;
+  notes?: string;
+}
+
+export interface UpdateRecurringTransactionDto {
+  description?: string;
+  amount?: number;
+  endDate?: string;
+  maxOccurrences?: number;
+  categoryId?: string | null;
+  bankAccountId?: string;
+  notes?: string;
+}
+
 export interface CreateBankAccountDto {
   name: string;
   type: BankAccountType;
@@ -378,6 +433,12 @@ export interface CreatePurchaseDto {
   notes?: string;
 }
 
+export interface UpdatePurchaseDto {
+  description?: string;
+  notes?: string;
+  categoryId?: string | null;
+}
+
 export interface PayFaturaDto {
   bankAccountId: string;
   paidAt?: string;
@@ -385,4 +446,22 @@ export interface PayFaturaDto {
 
 export interface UpdateFaturaCategoryDto {
   categoryId: string | null;
+}
+
+// ─── Budgets ──────────────────────────────────────────────────────────────────
+
+export interface Budget {
+  id: string;
+  walletId: string;
+  categoryId: string;
+  categoryName: string | null;
+  amountCents: number;
+  spentCents: number;
+  pct: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertBudgetDto {
+  amountCents: number;
 }

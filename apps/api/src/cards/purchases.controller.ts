@@ -3,7 +3,10 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -11,6 +14,7 @@ import {
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { PurchasesService } from './purchases.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
+import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import { SessionGuard } from '../auth/guards/session.guard';
 import { WalletMemberGuard } from '../wallets/guards/wallet-member.guard';
 import { RequireWalletRole } from '../wallets/decorators/wallet-role.decorator';
@@ -57,6 +61,19 @@ export class PurchasesController {
     return this.purchasesService.create(walletId, cardId, dto);
   }
 
+  @Patch(':purchaseId')
+  @RequireWalletRole('editor')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Editar descrição, notas e categoria da compra' })
+  update(
+    @Param('walletId') walletId: string,
+    @Param('cardId') cardId: string,
+    @Param('purchaseId') purchaseId: string,
+    @Body() dto: UpdatePurchaseDto,
+  ) {
+    return this.purchasesService.update(walletId, cardId, purchaseId, dto);
+  }
+
   @Delete(':purchaseId')
   @RequireWalletRole('editor')
   @ApiOperation({ summary: 'Cancelar compra (se não houver parcelas em fatura paga)' })
@@ -66,5 +83,18 @@ export class PurchasesController {
     @Param('purchaseId') purchaseId: string,
   ) {
     return this.purchasesService.cancel(walletId, cardId, purchaseId);
+  }
+
+  @Post(':purchaseId/installments/:installmentId/cancel')
+  @RequireWalletRole('editor')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cancelar parcela individual' })
+  cancelInstallment(
+    @Param('walletId') walletId: string,
+    @Param('cardId') cardId: string,
+    @Param('purchaseId') purchaseId: string,
+    @Param('installmentId') installmentId: string,
+  ) {
+    return this.purchasesService.cancelInstallment(walletId, cardId, purchaseId, installmentId);
   }
 }

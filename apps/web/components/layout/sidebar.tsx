@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import {
@@ -100,7 +101,7 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
       </div>
 
       {/* Navigation links */}
-      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+      <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
         {walletId ? (
           NAV_ITEMS.map((item) => {
             const href = item.href(walletId);
@@ -111,19 +112,23 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
                 href={href}
                 onClick={onNavigate}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",
+                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium",
+                  "transition-all duration-150",
                   active
-                    ? "bg-brand-primary-100 text-brand-primary"
-                    : "text-muted-foreground hover:bg-neutral-surface hover:text-foreground"
+                    ? "bg-brand-primary-100 text-brand-primary shadow-sm"
+                    : "text-muted-foreground hover:bg-neutral-surface hover:text-foreground hover:translate-x-0.5"
                 )}
               >
                 <item.icon
                   className={cn(
-                    "h-4 w-4 shrink-0",
-                    active ? "text-brand-primary" : "text-muted-foreground"
+                    "h-4 w-4 shrink-0 transition-colors duration-150",
+                    active ? "text-brand-primary" : "text-muted-foreground group-hover:text-foreground"
                   )}
                 />
-                {item.label}
+                <span>{item.label}</span>
+                {active && (
+                  <div className="ml-auto w-1.5 h-1.5 rounded-full bg-brand-primary" />
+                )}
               </Link>
             );
           })
@@ -132,9 +137,15 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
             <Link
               href="/wallets"
               onClick={onNavigate}
-              className="flex items-center gap-3 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+              className={cn(
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium",
+                "transition-all duration-150",
+                pathname === "/wallets"
+                  ? "bg-brand-primary-100 text-brand-primary shadow-sm"
+                  : "text-muted-foreground hover:bg-neutral-surface hover:text-foreground hover:translate-x-0.5"
+              )}
             >
-              <Wallet className="h-4 w-4" />
+              <Wallet className="h-4 w-4 shrink-0" />
               Minhas Carteiras
             </Link>
           </div>
@@ -144,7 +155,7 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
       {/* User section */}
       <div className="px-3 pb-4 space-y-2">
         <Separator className="mb-3" />
-        <div className="flex items-center gap-3 px-2 py-1">
+        <div className="flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-neutral-surface transition-colors duration-150">
           <Avatar className="h-8 w-8 shrink-0">
             <AvatarFallback className="bg-brand-primary-100 text-brand-primary text-xs font-semibold">
               {user ? getInitials(user.email) : "?"}
@@ -160,7 +171,7 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 text-muted-foreground hover:text-destructive shrink-0"
+                className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-red-50 shrink-0 transition-all duration-150"
                 onClick={() => logoutMutation.mutate()}
                 disabled={logoutMutation.isPending}
               >
@@ -181,11 +192,8 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
 
 function LogoBar() {
   return (
-    <div className="flex items-center gap-2 px-4 py-5 border-b border-neutral-border shrink-0">
-      <div className="w-8 h-8 rounded-lg bg-brand-primary flex items-center justify-center shrink-0">
-        <span className="text-white font-bold text-sm">L</span>
-      </div>
-      <span className="font-bold text-lg text-foreground">Ledger</span>
+    <div className="px-4 py-4 border-b border-neutral-border shrink-0">
+      <Image src="/icon.png" width={224} height={60} alt="whalet" className="w-full h-auto" />
     </div>
   );
 }
@@ -206,7 +214,7 @@ export function Sidebar() {
       {/* Mobile: backdrop */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          className="fixed inset-0 z-40 bg-black/50 md:hidden backdrop-blur-sm"
           onClick={() => setMobileOpen(false)}
         />
       )}
@@ -214,21 +222,19 @@ export function Sidebar() {
       {/* Mobile: slide-in drawer */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex flex-col w-72 bg-white border-r border-neutral-border transition-transform duration-300 md:hidden",
+          "fixed inset-y-0 left-0 z-50 flex flex-col w-72 bg-white border-r border-neutral-border",
+          "transition-transform duration-300 ease-in-out md:hidden shadow-xl",
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-border shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-brand-primary flex items-center justify-center shrink-0">
-              <span className="text-white font-bold text-sm">L</span>
-            </div>
-            <span className="font-bold text-lg text-foreground">Ledger</span>
+          <div className="flex items-center gap-2.5">
+            <Image src="/icon.png" width={120} height={32} alt="whalet" className="shrink-0" />
           </div>
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8"
+            className="h-8 w-8 hover:bg-neutral-surface transition-colors duration-150"
             onClick={() => setMobileOpen(false)}
           >
             <X className="h-4 w-4" />
@@ -240,20 +246,17 @@ export function Sidebar() {
       </aside>
 
       {/* Mobile: top header bar with hamburger — only visible on mobile */}
-      <div className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 h-14 bg-white border-b border-neutral-border">
+      <div className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 h-14 bg-white/90 backdrop-blur-sm border-b border-neutral-border">
         <Button
           variant="ghost"
           size="icon"
-          className="h-9 w-9"
+          className="h-9 w-9 hover:bg-neutral-surface transition-colors duration-150"
           onClick={() => setMobileOpen(true)}
         >
           <Menu className="h-5 w-5" />
         </Button>
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-brand-primary flex items-center justify-center">
-            <span className="text-white font-bold text-xs">L</span>
-          </div>
-          <span className="font-bold text-base text-foreground">Ledger</span>
+          <Image src="/icon.png" width={100} height={28} alt="whalet" className="shrink-0" />
         </div>
         {/* spacer to center logo */}
         <div className="w-9" />

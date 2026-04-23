@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -99,11 +100,8 @@ export default function LoginPage() {
   return (
     <Card className="shadow-lg border-neutral-border">
       <CardHeader className="space-y-1 pb-6">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-8 h-8 rounded-lg bg-brand-primary flex items-center justify-center">
-            <span className="text-white font-bold text-sm">L</span>
-          </div>
-          <span className="font-semibold text-lg text-foreground">Ledger</span>
+        <div className="mb-2">
+          <Image src="/icon.png" width={400} height={120} alt="whalet" className="w-full h-auto" />
         </div>
 
         {step === "email" ? (

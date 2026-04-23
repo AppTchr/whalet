@@ -41,6 +41,12 @@ export class TransactionResponseDto {
   @ApiPropertyOptional({ nullable: true })
   transferGroupId: string | null;
 
+  @ApiPropertyOptional({ nullable: true })
+  recurrenceId: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  recurrenceIndex: number | null;
+
   @ApiProperty()
   createdAt: Date;
 

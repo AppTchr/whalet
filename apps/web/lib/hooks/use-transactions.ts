@@ -50,8 +50,13 @@ export function useCreateTransaction(walletId: string) {
 
 export function useUpdateTransaction(walletId: string) {
   const queryClient = useQueryClient();
-  return useMutation<Transaction, Error, { id: string; dto: UpdateTransactionDto }>({
-    mutationFn: ({ id, dto }) => updateTransaction(walletId, id, dto),
+  return useMutation<
+    Transaction,
+    Error,
+    { id: string; dto: UpdateTransactionDto; applyToFollowing?: boolean }
+  >({
+    mutationFn: ({ id, dto, applyToFollowing }) =>
+      updateTransaction(walletId, id, dto, applyToFollowing),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions", walletId] });
       queryClient.invalidateQueries({ queryKey: ["wallets"] });
@@ -72,8 +77,13 @@ export function usePayTransaction(walletId: string) {
 
 export function useCancelTransaction(walletId: string) {
   const queryClient = useQueryClient();
-  return useMutation<Transaction, Error, string>({
-    mutationFn: (id) => cancelTransaction(walletId, id),
+  return useMutation<
+    Transaction,
+    Error,
+    { id: string; applyToFollowing?: boolean }
+  >({
+    mutationFn: ({ id, applyToFollowing }) =>
+      cancelTransaction(walletId, id, applyToFollowing),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions", walletId] });
       queryClient.invalidateQueries({ queryKey: ["wallets"] });

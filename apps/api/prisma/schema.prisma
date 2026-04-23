@@ -107,14 +107,16 @@ model Wallet {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
-  owner        User           @relation("WalletOwner", fields: [ownerUserId], references: [id])
-  members      WalletMember[]
-  categories   Category[]
-  bankAccounts BankAccount[]
-  transactions Transaction[]
-  creditCards  CreditCard[]
-  faturas      Fatura[]
-  installments Installment[]
+  owner                 User                   @relation("WalletOwner", fields: [ownerUserId], references: [id])
+  members               WalletMember[]
+  categories            Category[]
+  bankAccounts          BankAccount[]
+  transactions          Transaction[]
+  creditCards           CreditCard[]
+  faturas               Fatura[]
+  installments          Installment[]
+  recurringTransactions RecurringTransaction[]
+  budgets               Budget[]
 
   @@index([ownerUserId])
   @@index([isArchived])
@@ -193,10 +195,12 @@ model Category {
   createdAt  DateTime     @default(now())
   updatedAt  DateTime     @updatedAt
 
-  wallet       Wallet               @relation(fields: [walletId], references: [id])
-  transactions Transaction[]
-  purchases    CreditCardPurchase[]
-  faturas      Fatura[]
+  wallet                Wallet                 @relation(fields: [walletId], references: [id])
+  transactions          Transaction[]
+  purchases             CreditCardPurchase[]
+  faturas               Fatura[]
+  recurringTransactions RecurringTransaction[]
+  budgets               Budget[]
 
   @@unique([walletId, name])
   @@index([walletId])
@@ -214,42 +218,87 @@ model BankAccount {
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
-  wallet       Wallet        @relation(fields: [walletId], references: [id])
-  transactions Transaction[]
+  wallet                Wallet                 @relation(fields: [walletId], references: [id])
+  transactions          Transaction[]
+  recurringTransactions RecurringTransaction[]
 
   @@index([walletId])
   @@map("bank_accounts")
 }
 
 model Transaction {
-  id              String            @id @default(uuid())
-  walletId        String
-  categoryId      String?
-  bankAccountId   String?
-  type            TransactionType
-  status          TransactionStatus @default(pending)
-  amount          Decimal           @db.Decimal(14, 2)
-  sign            Int
-  description     String?           @db.VarChar(255)
-  notes           String?           @db.Text
-  dueDate         DateTime          @db.Date
-  paidAt          DateTime?
-  transferGroupId String?
-  deletedAt       DateTime?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  id               String            @id @default(uuid())
+  walletId         String
+  categoryId       String?
+  bankAccountId    String?
+  type             TransactionType
+  status           TransactionStatus @default(pending)
+  amount           Decimal           @db.Decimal(14, 2)
+  sign             Int
+  description      String?           @db.VarChar(255)
+  notes            String?           @db.Text
+  dueDate          DateTime          @db.Date
+  paidAt           DateTime?
+  transferGroupId  String?
+  recurrenceId     String?
+  recurrenceIndex  Int?
+  deletedAt        DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
-  wallet                 Wallet       @relation(fields: [walletId], references: [id])
-  category               Category?    @relation(fields: [categoryId], references: [id])
-  bankAccount            BankAccount? @relation(fields: [bankAccountId], references: [id])
-  invoicePaymentFatura   Fatura?      @relation("FaturaPaymentTx")
-  projectedPaymentFatura Fatura?      @relation("FaturaProjectedTx")
+  wallet                 Wallet                @relation(fields: [walletId], references: [id])
+  category               Category?             @relation(fields: [categoryId], references: [id])
+  bankAccount            BankAccount?          @relation(fields: [bankAccountId], references: [id])
+  recurringTransaction   RecurringTransaction? @relation(fields: [recurrenceId], references: [id])
+  invoicePaymentFatura   Fatura?               @relation("FaturaPaymentTx")
+  projectedPaymentFatura Fatura?               @relation("FaturaProjectedTx")
 
   @@index([walletId, status])
   @@index([walletId, dueDate])
   @@index([walletId, type])
   @@index([transferGroupId])
+  @@index([recurrenceId])
   @@map("transactions")
+}
+
+// =============================================================================
+// Recurring Transactions Domain
+// =============================================================================
+
+enum RecurrenceFrequency {
+  daily
+  weekly
+  biweekly
+  monthly
+}
+
+model RecurringTransaction {
+  id                String              @id @default(uuid())
+  walletId          String
+  type              TransactionType
+  frequency         RecurrenceFrequency
+  description       String              @db.VarChar(255)
+  amount            Decimal             @db.Decimal(14, 2)
+  categoryId        String?
+  bankAccountId     String?
+  notes             String?             @db.Text
+  startDate         DateTime            @db.Date
+  endDate           DateTime?           @db.Date
+  maxOccurrences    Int?
+  lastGeneratedDate DateTime?           @db.Date
+  isActive          Boolean             @default(true)
+  deletedAt         DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  wallet      Wallet        @relation(fields: [walletId], references: [id])
+  category    Category?     @relation(fields: [categoryId], references: [id])
+  bankAccount BankAccount?  @relation(fields: [bankAccountId], references: [id])
+  occurrences Transaction[]
+
+  @@index([walletId])
+  @@index([walletId, isActive])
+  @@map("recurring_transactions")
 }
 
 // =============================================================================
@@ -362,4 +411,24 @@ model Installment {
   @@index([cardId, status])
   @@index([walletId, status])
   @@map("installments")
+}
+
+// =============================================================================
+// Budgets Domain
+// =============================================================================
+
+model Budget {
+  id          String   @id @default(uuid())
+  walletId    String
+  categoryId  String
+  amountCents Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  wallet   Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([walletId, categoryId])
+  @@index([walletId])
+  @@map("budgets")
 }

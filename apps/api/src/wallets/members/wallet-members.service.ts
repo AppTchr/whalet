@@ -81,10 +81,11 @@ export class WalletMembersService {
     const members = await this.prisma.walletMember.findMany({
       where: { walletId },
       orderBy: { createdAt: 'asc' },
+      include: { user: { select: { email: true } } },
     });
 
     return {
-      members: members.map((m) => this.toDto(m)),
+      members: members.map((m) => this.toDtoWithUser(m)),
       total: members.length,
     };
   }
@@ -203,8 +204,6 @@ export class WalletMembersService {
   // ---------------------------------------------------------------------------
 
   private toDto(member: WalletMember): MemberResponseDto {
-    // FIX H2: normalize status — 'invited' becomes 'pending' externally so the
-    // API never reveals whether the invited email is registered in the system
     const externalStatus: 'active' | 'pending' | 'revoked' =
       member.status === 'invited' ? 'pending' : member.status;
 
@@ -220,5 +219,16 @@ export class WalletMembersService {
       createdAt: member.createdAt,
       updatedAt: member.updatedAt,
     };
+  }
+
+  private toDtoWithUser(
+    member: WalletMember & { user: { email: string } | null },
+  ): MemberResponseDto {
+    const dto = this.toDto(member);
+    // For registered users invitedEmail is cleared — resolve from user relation
+    if (!dto.invitedEmail && member.user?.email) {
+      dto.invitedEmail = member.user.email;
+    }
+    return dto;
   }
 }

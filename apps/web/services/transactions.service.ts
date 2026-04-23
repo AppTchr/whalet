@@ -41,11 +41,13 @@ export async function createTransaction(
 export async function updateTransaction(
   walletId: string,
   id: string,
-  dto: UpdateTransactionDto
+  dto: UpdateTransactionDto,
+  applyToFollowing = false
 ): Promise<Transaction> {
   const response = await api.patch<Transaction>(
     `/wallets/${walletId}/transactions/${id}`,
-    dto
+    dto,
+    applyToFollowing ? { params: { applyToFollowing: "true" } } : undefined
   );
   return response.data;
 }
@@ -64,10 +66,13 @@ export async function payTransaction(
 
 export async function cancelTransaction(
   walletId: string,
-  id: string
+  id: string,
+  applyToFollowing = false
 ): Promise<Transaction> {
   const response = await api.post<Transaction>(
-    `/wallets/${walletId}/transactions/${id}/cancel`
+    `/wallets/${walletId}/transactions/${id}/cancel`,
+    {},
+    applyToFollowing ? { params: { applyToFollowing: "true" } } : undefined
   );
   return response.data;
 }

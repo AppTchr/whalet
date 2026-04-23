@@ -1,10 +1,11 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { listPurchases, createPurchase, cancelPurchase } from "@/services/purchases.service";
+import { listPurchases, createPurchase, cancelPurchase, updatePurchase, cancelInstallment } from "@/services/purchases.service";
 import type {
   CreditCardPurchase,
   CreatePurchaseDto,
+  UpdatePurchaseDto,
 } from "@/types/api";
 
 export function usePurchases(walletId: string, cardId: string) {
@@ -20,6 +21,27 @@ export function useCancelPurchase(walletId: string, cardId: string) {
   const queryClient = useQueryClient();
   return useMutation<CreditCardPurchase, Error, string>({
     mutationFn: (purchaseId) => cancelPurchase(walletId, cardId, purchaseId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["purchases", walletId, cardId] });
+      queryClient.invalidateQueries({ queryKey: ["faturas", walletId, cardId] });
+    },
+  });
+}
+
+export function useUpdatePurchase(walletId: string, cardId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<CreditCardPurchase, Error, { purchaseId: string; dto: UpdatePurchaseDto }>({
+    mutationFn: ({ purchaseId, dto }) => updatePurchase(walletId, cardId, purchaseId, dto),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["purchases", walletId, cardId] });
+    },
+  });
+}
+
+export function useCancelInstallment(walletId: string, cardId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<CreditCardPurchase, Error, { purchaseId: string; installmentId: string }>({
+    mutationFn: ({ purchaseId, installmentId }) => cancelInstallment(walletId, cardId, purchaseId, installmentId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["purchases", walletId, cardId] });
       queryClient.invalidateQueries({ queryKey: ["faturas", walletId, cardId] });

@@ -17,12 +17,15 @@ import {
   Search,
   X,
   Pencil,
+  Receipt,
+  Repeat2,
 } from "lucide-react";
 import { useWallet } from "@/lib/hooks/use-wallet";
 import { useTransactions, useCreateTransaction, useUpdateTransaction, usePayTransaction, useCancelTransaction } from "@/lib/hooks/use-transactions";
 import { useBankAccounts } from "@/lib/hooks/use-bank-accounts";
 import { useCategories } from "@/lib/hooks/use-categories";
 import { useCards } from "@/lib/hooks/use-cards";
+import { useCreateRecurringTransaction } from "@/lib/hooks/use-recurring-transactions";
 import { createPurchase } from "@/services/purchases.service";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,7 +47,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { Transaction, TransactionType, TransactionStatus } from "@/types/api";
+import type {
+  Transaction,
+  TransactionType,
+  TransactionStatus,
+  RecurrenceFrequency,
+} from "@/types/api";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -86,11 +94,11 @@ function formatDate(dateStr: string): string {
 function statusBadgeClass(status: TransactionStatus): string {
   switch (status) {
     case "paid":
-      return "bg-green-100 text-green-700 border-green-200";
+      return "bg-emerald-100 text-emerald-700 border-emerald-200 font-medium";
     case "pending":
-      return "bg-orange-100 text-orange-700 border-orange-200";
+      return "bg-amber-100 text-amber-700 border-amber-200 font-medium";
     case "canceled":
-      return "bg-gray-100 text-gray-600 border-gray-200";
+      return "bg-slate-100 text-slate-500 border-slate-200 font-medium";
   }
 }
 
@@ -104,6 +112,13 @@ const PAYMENT_TYPES = [
 
 type PaymentType = (typeof PAYMENT_TYPES)[number]["value"];
 
+const FREQUENCY_LABELS: Record<RecurrenceFrequency, string> = {
+  daily: "Diária",
+  weekly: "Semanal",
+  biweekly: "Quinzenal",
+  monthly: "Mensal",
+};
+
 const regularSchema = z.object({
   mode: z.literal("regular"),
   type: z.enum(["income", "expense"] as const),
@@ -114,6 +129,10 @@ const regularSchema = z.object({
   bankAccountId: z.string().optional(),
   categoryId: z.string().optional(),
   notes: z.string().optional(),
+  // Recurrence fields (optional)
+  isRecurring: z.boolean().optional(),
+  frequency: z.enum(["daily", "weekly", "biweekly", "monthly"] as const).optional(),
+  endDate: z.string().optional(),
 });
 
 const cardPurchaseSchema = z.object({
@@ -150,6 +169,7 @@ function CreateTransactionDialog({
   const activeCards = cards?.filter((c) => !c.isArchived);
 
   const { mutate: createTx, isPending: txPending } = useCreateTransaction(walletId);
+  const { mutate: createRecurring, isPending: recurringPending } = useCreateRecurringTransaction(walletId);
   const queryClient = useQueryClient();
 
   const {
@@ -158,7 +178,6 @@ function CreateTransactionDialog({
     control,
     reset,
     watch,
-    setValue,
     formState: { errors },
   } = useForm<CreateFormValues>({
     resolver: zodResolver(createSchema),
@@ -170,9 +189,6 @@ function CreateTransactionDialog({
       purchaseDate: new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }),
     } as unknown as CreateFormValues,
   });
-
-  const watchedMode = paymentType === "credit_card_purchase" ? "card" : "regular";
-  const watchedType = paymentType === "income" ? "income" : "expense";
 
   const filteredCategories = categories?.filter(
     (c) => !c.isArchived && (c.type === (paymentType === "income" ? "income" : "expense") || c.type === "any")
@@ -213,6 +229,32 @@ function CreateTransactionDialog({
       return;
     }
 
+    // Recurrence path
+    if (values.mode === "regular" && values.isRecurring && values.frequency) {
+      createRecurring(
+        {
+          type: values.type as "income" | "expense",
+          frequency: values.frequency as RecurrenceFrequency,
+          description: values.description,
+          amount: values.amount,
+          startDate: values.dueDate,
+          endDate: values.endDate || undefined,
+          categoryId: values.categoryId || undefined,
+          bankAccountId: values.bankAccountId || undefined,
+          notes: values.notes || undefined,
+        },
+        {
+          onSuccess: () => {
+            toast.success("Transação recorrente criada e ocorrências geradas.");
+            reset();
+            onOpenChange(false);
+          },
+          onError: () => toast.error("Não foi possível criar a recorrência."),
+        }
+      );
+      return;
+    }
+
     createTx(
       {
         type: values.type,
@@ -238,7 +280,7 @@ function CreateTransactionDialog({
   }
 
   const isCard = paymentType === "credit_card_purchase";
-  const isPending = txPending;
+  const isPending = txPending || recurringPending;
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) { reset(); setPaymentType("expense"); } onOpenChange(v); }}>
@@ -248,7 +290,6 @@ function CreateTransactionDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          {/* Tipo de pagamento */}
           <div className="space-y-1.5">
             <Label>Tipo</Label>
             <Select value={paymentType} onValueChange={(v) => handlePaymentTypeChange(v as PaymentType)}>
@@ -263,7 +304,6 @@ function CreateTransactionDialog({
             </Select>
           </div>
 
-          {/* Seletor de cartão */}
           {isCard && (
             <div className="space-y-1.5">
               <Label>Cartão de Crédito</Label>
@@ -291,21 +331,18 @@ function CreateTransactionDialog({
             </div>
           )}
 
-          {/* Descrição */}
           <div className="space-y-1.5">
             <Label htmlFor="description">Descrição</Label>
             <Input id="description" className="w-full" placeholder="Ex: Supermercado" {...register("description")} />
             {errors.description && <p className="text-xs text-destructive">{errors.description.message}</p>}
           </div>
 
-          {/* Valor */}
           <div className="space-y-1.5">
             <Label htmlFor="amount">Valor total (R$)</Label>
             <Input id="amount" type="number" step="0.01" min="0.01" placeholder="0.00" className="w-full" {...register("amount")} />
             {errors.amount && <p className="text-xs text-destructive">{errors.amount.message}</p>}
           </div>
 
-          {/* Parcelas */}
           {isCard && (
             <div className="space-y-1.5">
               <Label>Parcelas</Label>
@@ -330,7 +367,6 @@ function CreateTransactionDialog({
             </div>
           )}
 
-          {/* Data */}
           <div className="space-y-1.5">
             <Label htmlFor="date">{isCard ? "Data da compra" : "Vencimento"}</Label>
             <Input
@@ -347,7 +383,6 @@ function CreateTransactionDialog({
             )}
           </div>
 
-          {/* Status */}
           {!isCard && (
             <div className="space-y-1.5">
               <Label>Status</Label>
@@ -367,7 +402,6 @@ function CreateTransactionDialog({
             </div>
           )}
 
-          {/* Conta bancária */}
           {!isCard && bankAccounts && bankAccounts.length > 0 && (
             <div className="space-y-1.5">
               <Label>Conta (opcional)</Label>
@@ -391,7 +425,6 @@ function CreateTransactionDialog({
             </div>
           )}
 
-          {/* Categoria */}
           <div className="space-y-1.5">
             <Label>Categoria (opcional)</Label>
             <Controller
@@ -417,15 +450,69 @@ function CreateTransactionDialog({
             />
           </div>
 
-          {/* Observações */}
           <div className="space-y-1.5">
             <Label htmlFor="notes">Observações (opcional)</Label>
             <Textarea id="notes" placeholder="Observações adicionais..." rows={2} className="w-full" {...register("notes")} />
           </div>
 
+          {/* ── Recurrence toggle (only for income/expense) ── */}
+          {!isCard && (
+            <div className="space-y-3 pt-1 border-t border-border/50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-sm font-medium">Transação recorrente</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">Repete automaticamente</p>
+                </div>
+                <Controller
+                  name={"isRecurring" as never}
+                  control={control}
+                  render={({ field }: { field: { value: boolean; onChange: (v: boolean) => void } }) => (
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={!!field.value}
+                      onClick={() => field.onChange(!field.value)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${field.value ? "bg-brand-primary" : "bg-muted"}`}
+                    >
+                      <span className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${field.value ? "translate-x-6" : "translate-x-1"}`} />
+                    </button>
+                  )}
+                />
+              </div>
+
+              {watch("isRecurring" as never) && (
+                <div className="space-y-3 pl-1">
+                  <div className="space-y-1.5">
+                    <Label>Frequência</Label>
+                    <Controller
+                      name={"frequency" as never}
+                      control={control}
+                      render={({ field }: { field: { value: string; onChange: (v: string) => void } }) => (
+                        <Select value={field.value ?? "monthly"} onValueChange={field.onChange}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Selecionar frequência" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(Object.keys(FREQUENCY_LABELS) as RecurrenceFrequency[]).map((f) => (
+                              <SelectItem key={f} value={f}>{FREQUENCY_LABELS[f]}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="endDate">Data de término (opcional)</Label>
+                    <Input id="endDate" type="date" className="w-full" {...register("endDate" as never)} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <DialogFooter className="flex-col sm:flex-row gap-2">
             <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)}>Cancelar</Button>
-            <Button type="submit" className="w-full sm:w-auto" disabled={isPending}>
+            <Button type="submit" className="w-full sm:w-auto bg-brand-primary hover:bg-brand-primary/90" disabled={isPending}>
               {isPending ? "Criando..." : isCard ? "Adicionar ao cartão" : "Criar"}
             </Button>
           </DialogFooter>
@@ -453,11 +540,13 @@ function EditTransactionDialog({
   tx,
   open,
   onOpenChange,
+  applyToFollowing = false,
 }: {
   walletId: string;
   tx: Transaction | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  applyToFollowing?: boolean;
 }) {
   const { data: bankAccountsRaw } = useBankAccounts(walletId);
   const { data: categories } = useCategories(walletId);
@@ -470,7 +559,6 @@ function EditTransactionDialog({
     resolver: zodResolver(editSchema),
   });
 
-  // Populate form when dialog opens with a transaction
   useEffect(() => {
     if (tx && open) {
       reset({
@@ -483,7 +571,6 @@ function EditTransactionDialog({
     }
   }, [tx, open, reset]);
 
-  // Reset on open change
   function handleOpenChange(v: boolean) {
     if (!v) reset();
     onOpenChange(v);
@@ -501,9 +588,17 @@ function EditTransactionDialog({
           ...(values.bankAccountId && values.bankAccountId !== "none" ? { bankAccountId: values.bankAccountId } : {}),
           notes: values.notes || undefined,
         },
+        applyToFollowing,
       },
       {
-        onSuccess: () => { toast.success("Transação atualizada."); handleOpenChange(false); },
+        onSuccess: () => {
+          toast.success(
+            applyToFollowing
+              ? "Transação e seguintes atualizadas."
+              : "Transação atualizada."
+          );
+          handleOpenChange(false);
+        },
         onError: () => toast.error("Não foi possível atualizar a transação."),
       }
     );
@@ -515,7 +610,12 @@ function EditTransactionDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Editar Transação</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            {applyToFollowing && tx?.recurrenceId && (
+              <Repeat2 className="h-4 w-4 text-brand-primary flex-shrink-0" />
+            )}
+            Editar {applyToFollowing && tx?.recurrenceId ? "esta e as seguintes" : "Transação"}
+          </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-1.5">
@@ -603,6 +703,7 @@ function TransactionListItem({
   onPay,
   onEdit,
   onCancel,
+  index,
 }: {
   tx: Transaction;
   currencyCode: string;
@@ -611,56 +712,83 @@ function TransactionListItem({
   onPay: (id: string) => void;
   onEdit: (tx: Transaction) => void;
   onCancel: (id: string) => void;
+  index: number;
 }) {
   const isIncome = tx.sign === 1;
   const isExpense = tx.sign === -1;
   const isPending = tx.status === "pending";
   const isCanceled = tx.status === "canceled";
+  const staggerClass = `stagger-${Math.min(index + 1, 8)}`;
 
   return (
-    <div className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted/40 transition-colors group">
+    <div
+      className={`flex items-center gap-3 p-3 rounded-xl transition-colors hover:bg-muted/50 group animate-in fade-in-0 slide-in-from-left-2 duration-300 fill-mode-both ${staggerClass}`}
+    >
+      {/* Icon */}
       <div
-        className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-          isIncome ? "bg-green-50" : isExpense ? "bg-red-50" : "bg-gray-50"
+        className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-105 duration-200 ${
+          isIncome
+            ? "bg-emerald-100 shadow-sm shadow-emerald-100"
+            : isExpense
+            ? "bg-red-100 shadow-sm shadow-red-100"
+            : "bg-slate-100"
         }`}
       >
         {isIncome ? (
-          <TrendingUp className="h-4 w-4 text-green-600" />
+          <TrendingUp className="h-4 w-4 text-emerald-600" />
         ) : isExpense ? (
-          <TrendingDown className="h-4 w-4 text-red-600" />
+          <TrendingDown className="h-4 w-4 text-red-500" />
         ) : (
-          <ArrowLeftRight className="h-4 w-4 text-gray-500" />
+          <ArrowLeftRight className="h-4 w-4 text-slate-500" />
         )}
       </div>
 
+      {/* Description */}
       <div className="flex-1 min-w-0">
-        <p className={`text-sm font-semibold truncate ${isCanceled ? "line-through text-muted-foreground" : "text-foreground"}`}>
-          {tx.description ?? TRANSACTION_TYPE_LABELS[tx.type]}
-        </p>
-        <p className="text-xs text-muted-foreground truncate">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <p className={`text-sm font-semibold truncate ${
+            isCanceled ? "line-through text-muted-foreground" : "text-foreground"
+          }`}>
+            {tx.description ?? TRANSACTION_TYPE_LABELS[tx.type]}
+          </p>
+          {tx.recurrenceId && (
+            <span title="Transação recorrente">
+              <Repeat2 className="h-3 w-3 text-brand-primary flex-shrink-0 opacity-70" />
+            </span>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground truncate mt-0.5">
           {categoryName ?? TRANSACTION_TYPE_LABELS[tx.type]}
         </p>
       </div>
 
-      <div className="flex flex-col items-end gap-1 flex-shrink-0">
-        <p className={`text-sm font-semibold ${isIncome ? "text-green-600" : isExpense ? "text-red-600" : "text-foreground"}`}>
-          {isExpense ? "-" : isIncome ? "+" : ""}
+      {/* Amount + Date */}
+      <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+        <p className={`text-sm font-bold tabular-nums ${
+          isIncome ? "text-emerald-600" : isExpense ? "text-red-500" : "text-foreground"
+        }`}>
+          {isExpense ? "−" : isIncome ? "+" : ""}
           {formatAmount(tx.amount, currencyCode)}
         </p>
         <p className="text-xs text-muted-foreground">{formatDate(tx.dueDate)}</p>
       </div>
 
-      <Badge variant="secondary" className={`text-xs flex-shrink-0 hidden sm:inline-flex ${statusBadgeClass(tx.status)}`}>
+      {/* Status badge */}
+      <Badge
+        variant="outline"
+        className={`text-xs flex-shrink-0 hidden sm:inline-flex px-2 py-0.5 ${statusBadgeClass(tx.status)}`}
+      >
         {STATUS_LABELS[tx.status]}
       </Badge>
 
+      {/* Actions */}
       {canWrite && !isCanceled && (
-        <div className="flex gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all duration-150 translate-x-1 group-hover:translate-x-0">
           {isPending && (
             <Button
               size="sm"
               variant="outline"
-              className="h-7 text-xs text-green-700 border-green-200 hover:bg-green-50"
+              className="h-7 text-xs text-emerald-700 border-emerald-200 hover:bg-emerald-50 font-medium"
               onClick={() => onPay(tx.id)}
             >
               Pagar
@@ -678,7 +806,7 @@ function TransactionListItem({
           <Button
             size="sm"
             variant="ghost"
-            className="h-7 text-xs text-muted-foreground hover:text-destructive"
+            className="h-7 text-xs text-muted-foreground hover:text-destructive px-2"
             onClick={() => onCancel(tx.id)}
           >
             Cancelar
@@ -686,6 +814,61 @@ function TransactionListItem({
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Recurring Scope Dialog ───────────────────────────────────────────────────
+// Shown when the user tries to edit/cancel a recurring occurrence.
+
+type ScopeAction = "edit" | "cancel";
+
+function RecurringScopeDialog({
+  open,
+  action,
+  onClose,
+  onJustThis,
+  onThisAndFollowing,
+}: {
+  open: boolean;
+  action: ScopeAction;
+  onClose: () => void;
+  onJustThis: () => void;
+  onThisAndFollowing: () => void;
+}) {
+  const isEdit = action === "edit";
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Repeat2 className="h-4 w-4 text-brand-primary" />
+            {isEdit ? "Editar recorrência" : "Cancelar recorrência"}
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">
+          Esta é uma transação recorrente. Deseja {isEdit ? "editar" : "cancelar"} apenas esta ocorrência ou esta e todas as seguintes?
+        </p>
+        <DialogFooter className="flex-col gap-2 sm:flex-col">
+          <Button
+            variant="outline"
+            className="w-full justify-start"
+            onClick={() => { onJustThis(); onClose(); }}
+          >
+            Apenas esta ocorrência
+          </Button>
+          <Button
+            variant="default"
+            className="w-full justify-start bg-brand-primary hover:bg-brand-primary/90"
+            onClick={() => { onThisAndFollowing(); onClose(); }}
+          >
+            Esta e as seguintes
+          </Button>
+          <Button variant="ghost" className="w-full" onClick={onClose}>
+            Voltar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -705,6 +888,10 @@ export default function TransactionsPage() {
   const [search, setSearch] = useState<string>("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [accountFilter, setAccountFilter] = useState<string>("all");
+
+  // Recurring scope state
+  const [scopeAction, setScopeAction] = useState<ScopeAction>("cancel");
+  const [pendingScopeTx, setPendingScopeTx] = useState<Transaction | null>(null);
 
   const { data: wallet } = useWallet(walletId);
   const canWrite = wallet?.role === "owner" || wallet?.role === "editor";
@@ -729,55 +916,138 @@ export default function TransactionsPage() {
   const { mutate: cancelTx } = useCancelTransaction(walletId);
 
   const currencyCode = wallet?.currencyCode ?? "BRL";
-
   const categoryMap = new Map(categories?.map((c) => [c.id, c.name]) ?? []);
-
   const totalPages = data?.totalPages ?? 1;
+
+  // ── Recurring scope helpers ────────────────────────────────────────────────
+
+  // editTxFollowing: when user chose "esta e as seguintes" for an edit
+  const [editTxFollowing, setEditTxFollowing] = useState<Transaction | null>(null);
+
+  function handleEditClick(tx: Transaction) {
+    if (tx.recurrenceId) {
+      // open scope dialog with this tx pending
+      setScopeAction("edit");
+      setPendingScopeTx(tx);
+    } else {
+      setEditTx(tx);
+    }
+  }
+
+  function handleCancelClick(tx: Transaction) {
+    if (tx.recurrenceId) {
+      setScopeAction("cancel");
+      setPendingScopeTx(tx);
+    } else {
+      cancelTx(
+        { id: tx.id },
+        {
+          onSuccess: () => toast.success("Transação cancelada."),
+          onError: () => toast.error("Não foi possível cancelar a transação."),
+        }
+      );
+    }
+  }
+
+  function executeCancelWithScope(applyToFollowing: boolean) {
+    if (!pendingScopeTx) return;
+    const txToCancel = pendingScopeTx;
+    setPendingScopeTx(null);
+    cancelTx(
+      { id: txToCancel.id, applyToFollowing },
+      {
+        onSuccess: () =>
+          toast.success(
+            applyToFollowing ? "Ocorrências canceladas." : "Transação cancelada."
+          ),
+        onError: () => toast.error("Não foi possível cancelar a transação."),
+      }
+    );
+  }
+
+  const hasActiveFilters =
+    statusFilter !== "all" ||
+    typeFilter !== "all" ||
+    dateFrom !== "" ||
+    dateTo !== "" ||
+    search !== "" ||
+    categoryFilter !== "all" ||
+    accountFilter !== "all";
 
   return (
     <div className="p-4 md:p-6 lg:p-8 max-w-4xl mx-auto">
-      {/* Cabeçalho */}
-      <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
+
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between mb-6 gap-4 flex-wrap animate-in fade-in-0 slide-in-from-top-2 duration-400 fill-mode-both">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-foreground">Transações</h1>
+          <div className="flex items-center gap-2 mb-0.5">
+            <Receipt className="h-4 w-4 text-brand-primary opacity-70" />
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Finanças
+            </span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">Transações</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Receitas, despesas e transferências
           </p>
         </div>
         {canWrite && (
-          <Button className="gap-2 min-h-10" onClick={() => setDialogOpen(true)}>
+          <Button
+            className="gap-2 min-h-10 bg-brand-primary hover:bg-brand-primary/90 shadow-sm shadow-brand-primary/25 transition-all hover:shadow-md"
+            onClick={() => setDialogOpen(true)}
+          >
             <Plus className="h-4 w-4" />
             Nova transação
           </Button>
         )}
       </div>
 
-      {/* Filtros */}
-      <div className="flex flex-col gap-3 mb-6">
-        {/* Linha 1: busca */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input
-            className="pl-9 pr-9 h-10 w-full"
-            placeholder="Buscar por descrição..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-          />
-          {search && (
-            <button
-              type="button"
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              onClick={() => { setSearch(""); setPage(1); }}
+      {/* ── Filters ────────────────────────────────────────────────────────── */}
+      <div
+        className="space-y-2 mb-5 animate-in fade-in-0 slide-in-from-top-1 duration-400 fill-mode-both"
+        style={{ animationDelay: "80ms" }}
+      >
+        {/* Row 1: Search + clear */}
+        <div className="flex gap-2 items-center">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              className="pl-9 pr-9 h-10 w-full bg-muted/40 border-muted focus:bg-background transition-colors"
+              placeholder="Buscar por descrição..."
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            />
+            {search && (
+              <button
+                type="button"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                onClick={() => { setSearch(""); setPage(1); }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          {hasActiveFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-10 px-3 text-xs text-muted-foreground hover:text-foreground gap-1.5 shrink-0"
+              onClick={() => {
+                setStatusFilter("all"); setTypeFilter("all");
+                setDateFrom(""); setDateTo(""); setSearch("");
+                setCategoryFilter("all"); setAccountFilter("all"); setPage(1);
+              }}
             >
-              <X className="h-4 w-4" />
-            </button>
+              <X className="h-3.5 w-3.5" />
+              Limpar
+            </Button>
           )}
         </div>
 
-        {/* Linha 2: dropdowns + intervalo de datas */}
-        <div className="flex flex-wrap items-center gap-3">
+        {/* Row 2: Selects */}
+        <div className="flex flex-wrap gap-2 items-center">
           <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
-            <SelectTrigger className="w-36">
+            <SelectTrigger className="w-auto min-w-[120px] h-8 text-xs">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -789,7 +1059,7 @@ export default function TransactionsPage() {
           </Select>
 
           <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(1); }}>
-            <SelectTrigger className="w-44">
+            <SelectTrigger className="w-auto min-w-[120px] h-8 text-xs">
               <SelectValue placeholder="Tipo" />
             </SelectTrigger>
             <SelectContent>
@@ -806,7 +1076,7 @@ export default function TransactionsPage() {
 
           {categories && categories.filter(c => !c.isArchived).length > 0 && (
             <Select value={categoryFilter} onValueChange={(v) => { setCategoryFilter(v); setPage(1); }}>
-              <SelectTrigger className="w-40">
+              <SelectTrigger className="w-auto min-w-[120px] h-8 text-xs">
                 <SelectValue placeholder="Categoria" />
               </SelectTrigger>
               <SelectContent>
@@ -820,7 +1090,7 @@ export default function TransactionsPage() {
 
           {activeBankAccounts && activeBankAccounts.length > 0 && (
             <Select value={accountFilter} onValueChange={(v) => { setAccountFilter(v); setPage(1); }}>
-              <SelectTrigger className="w-40">
+              <SelectTrigger className="w-auto min-w-[120px] h-8 text-xs">
                 <SelectValue placeholder="Conta" />
               </SelectTrigger>
               <SelectContent>
@@ -832,17 +1102,18 @@ export default function TransactionsPage() {
             </Select>
           )}
 
-          <div className="flex items-center gap-2 flex-wrap">
+          {/* Date range */}
+          <div className="flex items-center gap-1.5 ml-auto">
             <Input
               type="date"
-              className="w-36 h-10"
+              className="w-32 h-8 text-xs"
               value={dateFrom}
               onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
             />
-            <span className="text-muted-foreground text-sm">até</span>
+            <span className="text-muted-foreground text-xs">—</span>
             <Input
               type="date"
-              className="w-36 h-10"
+              className="w-32 h-8 text-xs"
               value={dateTo}
               onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
             />
@@ -850,13 +1121,16 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      {/* Lista de Transações */}
-      <div className="bg-card border border-neutral-border rounded-lg overflow-hidden">
+      {/* ── Transaction List ────────────────────────────────────────────────── */}
+      <div
+        className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm animate-in fade-in-0 duration-400 fill-mode-both"
+        style={{ animationDelay: "150ms" }}
+      >
         {isLoading ? (
-          <div className="p-3 space-y-2">
+          <div className="p-4 space-y-2">
             {Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="flex items-center gap-3 p-2">
-                <Skeleton className="w-10 h-10 rounded-full flex-shrink-0" />
+                <Skeleton className="w-10 h-10 rounded-xl flex-shrink-0" />
                 <div className="flex-1 space-y-1.5">
                   <Skeleton className="h-4 w-56" />
                   <Skeleton className="h-3 w-32" />
@@ -865,26 +1139,26 @@ export default function TransactionsPage() {
                   <Skeleton className="h-4 w-24" />
                   <Skeleton className="h-3 w-16" />
                 </div>
-                <Skeleton className="h-5 w-16 rounded-full" />
+                <Skeleton className="h-5 w-16 rounded-full hidden sm:block" />
               </div>
             ))}
           </div>
         ) : !data?.transactions?.length ? (
           <div className="flex flex-col items-center justify-center py-16 text-center px-4">
-            <div className="w-14 h-14 rounded-full bg-muted flex items-center justify-center mb-4">
-              <ArrowLeftRight className="h-6 w-6 text-muted-foreground" />
+            <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-4">
+              <ArrowLeftRight className="h-7 w-7 text-muted-foreground" />
             </div>
-            <h3 className="text-base font-semibold text-foreground mb-1">
+            <h3 className="text-base font-semibold text-foreground mb-1.5">
               Nenhuma transação encontrada
             </h3>
             <p className="text-sm text-muted-foreground max-w-xs">
-              {statusFilter !== "all" || typeFilter !== "all" || dateFrom || dateTo || search || categoryFilter !== "all" || accountFilter !== "all"
-                ? "Tente ajustar os filtros."
+              {hasActiveFilters
+                ? "Tente ajustar ou limpar os filtros."
                 : "Crie sua primeira transação para começar."}
             </p>
-            {canWrite && statusFilter === "all" && typeFilter === "all" && !dateFrom && !dateTo && !search && categoryFilter === "all" && accountFilter === "all" && (
+            {canWrite && !hasActiveFilters && (
               <Button
-                className="mt-4 gap-2"
+                className="mt-5 gap-2 bg-brand-primary hover:bg-brand-primary/90"
                 size="sm"
                 onClick={() => setDialogOpen(true)}
               >
@@ -892,35 +1166,73 @@ export default function TransactionsPage() {
                 Nova transação
               </Button>
             )}
+            {hasActiveFilters && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-4 gap-1.5"
+                onClick={() => {
+                  setStatusFilter("all");
+                  setTypeFilter("all");
+                  setDateFrom("");
+                  setDateTo("");
+                  setSearch("");
+                  setCategoryFilter("all");
+                  setAccountFilter("all");
+                  setPage(1);
+                }}
+              >
+                <X className="h-3.5 w-3.5" />
+                Limpar filtros
+              </Button>
+            )}
           </div>
         ) : (
           <div className="p-2">
-            {data.transactions.map((tx) => (
+            {data.transactions.map((tx, i) => (
               <TransactionListItem
                 key={tx.id}
                 tx={tx}
                 currencyCode={currencyCode}
                 categoryName={tx.categoryId ? categoryMap.get(tx.categoryId) : undefined}
                 canWrite={canWrite}
-                onPay={(id) => payTx({ id }, { onSuccess: () => toast.success("Marcado como pago."), onError: () => toast.error("Não foi possível marcar como pago.") })}
-                onEdit={(t) => setEditTx(t)}
-                onCancel={(id) => cancelTx(id, { onSuccess: () => toast.success("Transação cancelada."), onError: () => toast.error("Não foi possível cancelar a transação.") })}
+                index={i}
+                onPay={(id) =>
+                  payTx(
+                    { id },
+                    {
+                      onSuccess: () => toast.success("Marcado como pago."),
+                      onError: () => toast.error("Não foi possível marcar como pago."),
+                    }
+                  )
+                }
+                onEdit={(t) => handleEditClick(t)}
+                onCancel={(id) => {
+                  const t = data.transactions.find((x) => x.id === id);
+                  if (t) handleCancelClick(t);
+                }}
               />
             ))}
           </div>
         )}
       </div>
 
-      {/* Paginação */}
+      {/* ── Pagination ─────────────────────────────────────────────────────── */}
       {!isLoading && data && data.totalPages > 1 && (
-        <div className="flex items-center justify-between mt-4 flex-wrap gap-2">
+        <div className="flex items-center justify-between mt-5 flex-wrap gap-2">
           <p className="text-sm text-muted-foreground">
-            Página {data.page} de {data.totalPages} — {data.total} total
+            Página{" "}
+            <span className="font-semibold text-foreground">{data.page}</span>
+            {" "}de{" "}
+            <span className="font-semibold text-foreground">{data.totalPages}</span>
+            {" "}—{" "}
+            <span className="font-semibold text-foreground">{data.total}</span> transações
           </p>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
+              className="h-9 gap-1 transition-all"
               disabled={page <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
@@ -930,6 +1242,7 @@ export default function TransactionsPage() {
             <Button
               variant="outline"
               size="sm"
+              className="h-9 gap-1 transition-all"
               disabled={page >= totalPages}
               onClick={() => setPage((p) => p + 1)}
             >
@@ -945,11 +1258,44 @@ export default function TransactionsPage() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
       />
+
+      {/* Edit — single occurrence */}
       <EditTransactionDialog
         walletId={walletId}
         tx={editTx}
         open={editTx !== null}
         onOpenChange={(v) => { if (!v) setEditTx(null); }}
+        applyToFollowing={false}
+      />
+
+      {/* Edit — this and following */}
+      <EditTransactionDialog
+        walletId={walletId}
+        tx={editTxFollowing}
+        open={editTxFollowing !== null}
+        onOpenChange={(v) => { if (!v) setEditTxFollowing(null); }}
+        applyToFollowing={true}
+      />
+
+      {/* Scope chooser — shown for any recurring edit or cancel */}
+      <RecurringScopeDialog
+        open={pendingScopeTx !== null}
+        action={scopeAction}
+        onClose={() => setPendingScopeTx(null)}
+        onJustThis={() => {
+          if (scopeAction === "edit") {
+            setEditTx(pendingScopeTx);
+          } else {
+            executeCancelWithScope(false);
+          }
+        }}
+        onThisAndFollowing={() => {
+          if (scopeAction === "edit") {
+            setEditTxFollowing(pendingScopeTx);
+          } else {
+            executeCancelWithScope(true);
+          }
+        }}
       />
     </div>
   );

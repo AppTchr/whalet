@@ -1,7 +1,9 @@
 import {
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
@@ -17,6 +19,25 @@ import {
   TransactionListResponseDto,
   TransactionResponseDto,
 } from './dto/transaction-response.dto';
+
+// Avoid circular import — use a token + lazy reference
+export const RECURRING_SERVICE_TOKEN = 'RECURRING_TRANSACTIONS_SERVICE';
+
+export interface IRecurringTransactionsService {
+  editOccurrenceAndFollowing(
+    walletId: string,
+    transactionId: string,
+    dto: {
+      description?: string;
+      amount?: number;
+      dueDate?: string;
+      categoryId?: string | null;
+      bankAccountId?: string;
+      notes?: string;
+    },
+  ): Promise<void>;
+  cancelOccurrenceAndFollowing(walletId: string, transactionId: string): Promise<void>;
+}
 
 // ---------------------------------------------------------------------------
 // Raw Prisma transaction shape returned from DB queries
@@ -36,6 +57,8 @@ interface RawTransaction {
   categoryId: string | null;
   bankAccountId: string | null;
   transferGroupId: string | null;
+  recurrenceId: string | null;
+  recurrenceIndex: number | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -43,7 +66,11 @@ interface RawTransaction {
 
 @Injectable()
 export class TransactionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() @Inject(RECURRING_SERVICE_TOKEN)
+    private readonly recurringService: IRecurringTransactionsService | null,
+  ) {}
 
   // ---------------------------------------------------------------------------
   // Public CRUD methods
@@ -262,6 +289,7 @@ export class TransactionsService {
     walletId: string,
     id: string,
     dto: UpdateTransactionDto,
+    applyToFollowing = false,
   ): Promise<TransactionResponseDto> {
     const existing = await this.prisma.transaction.findFirst({
       where: { id, walletId, deletedAt: null },
@@ -298,6 +326,22 @@ export class TransactionsService {
       if (!ba) {
         throw new UnprocessableEntityException('BANK_ACCOUNT_NOT_IN_WALLET');
       }
+    }
+
+    // Recurring: apply to this occurrence and all following pending ones
+    if (applyToFollowing && existing.recurrenceId && this.recurringService) {
+      await this.recurringService.editOccurrenceAndFollowing(walletId, id, {
+        description: dto.description,
+        dueDate: dto.dueDate,
+        ...('categoryId' in dto && { categoryId: dto.categoryId }),
+        bankAccountId: dto.bankAccountId,
+        notes: dto.notes,
+      });
+      const refreshed = await this.prisma.transaction.findFirst({
+        where: { id, walletId, deletedAt: null },
+      });
+      if (!refreshed) throw new NotFoundException('TRANSACTION_NOT_FOUND');
+      return this.toDto(refreshed as RawTransaction);
     }
 
     // FIX SC-3: Include walletId in update where clause
@@ -437,7 +481,7 @@ export class TransactionsService {
     return this.toDto(updated as RawTransaction);
   }
 
-  async cancel(walletId: string, id: string): Promise<TransactionResponseDto> {
+  async cancel(walletId: string, id: string, applyToFollowing = false): Promise<TransactionResponseDto> {
     const existing = await this.prisma.transaction.findFirst({
       where: { id, walletId, deletedAt: null },
     });
@@ -448,6 +492,16 @@ export class TransactionsService {
 
     if (existing.status === TransactionStatus.canceled) {
       throw new UnprocessableEntityException('TRANSACTION_ALREADY_CANCELED');
+    }
+
+    // Recurring: cancel this occurrence and all following pending ones
+    if (applyToFollowing && existing.recurrenceId && this.recurringService) {
+      await this.recurringService.cancelOccurrenceAndFollowing(walletId, id);
+      const refreshed = await this.prisma.transaction.findFirst({
+        where: { id, walletId, deletedAt: null },
+      });
+      if (!refreshed) throw new NotFoundException('TRANSACTION_NOT_FOUND');
+      return this.toDto(refreshed as RawTransaction);
     }
 
     // Transfers: cancel both legs atomically
@@ -591,6 +645,8 @@ export class TransactionsService {
       categoryId: transaction.categoryId,
       bankAccountId: transaction.bankAccountId,
       transferGroupId: transaction.transferGroupId,
+      recurrenceId: transaction.recurrenceId ?? null,
+      recurrenceIndex: transaction.recurrenceIndex ?? null,
       createdAt: transaction.createdAt,
       updatedAt: transaction.updatedAt,
     };

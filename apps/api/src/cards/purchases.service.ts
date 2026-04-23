@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { FaturasService } from '../faturas/faturas.service';
 import { CreatePurchaseDto } from './dto/create-purchase.dto';
+import { UpdatePurchaseDto } from './dto/update-purchase.dto';
 import {
   PurchaseResponseDto,
   PurchaseListResponseDto,
@@ -264,6 +265,83 @@ export class PurchasesService {
     if (!purchase) throw new NotFoundException('PURCHASE_NOT_FOUND');
 
     return this.toDto(purchase);
+  }
+
+  async update(
+    walletId: string,
+    cardId: string,
+    id: string,
+    dto: UpdatePurchaseDto,
+  ): Promise<PurchaseResponseDto> {
+    const purchase = await this.prisma.creditCardPurchase.findFirst({
+      where: { id, cardId, walletId },
+    });
+    if (!purchase) throw new NotFoundException('PURCHASE_NOT_FOUND');
+    if (purchase.status === 'canceled') {
+      throw new UnprocessableEntityException('PURCHASE_ALREADY_CANCELED');
+    }
+
+    if (dto.categoryId !== undefined && dto.categoryId !== null) {
+      const cat = await this.prisma.category.findFirst({
+        where: { id: dto.categoryId, walletId, isArchived: false },
+      });
+      if (!cat) throw new NotFoundException('CATEGORY_NOT_FOUND');
+    }
+
+    await this.prisma.creditCardPurchase.update({
+      where: { id },
+      data: {
+        ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.notes !== undefined && { notes: dto.notes ?? null }),
+        ...('categoryId' in dto && { categoryId: dto.categoryId ?? null }),
+      },
+    });
+
+    return this.findOne(walletId, cardId, id);
+  }
+
+  async cancelInstallment(
+    walletId: string,
+    cardId: string,
+    purchaseId: string,
+    installmentId: string,
+  ): Promise<PurchaseResponseDto> {
+    const installment = await this.prisma.installment.findFirst({
+      where: { id: installmentId, purchaseId, cardId, walletId },
+      include: { fatura: true },
+    });
+
+    if (!installment) throw new NotFoundException('INSTALLMENT_NOT_FOUND');
+    if (installment.status === 'canceled') {
+      throw new UnprocessableEntityException('INSTALLMENT_ALREADY_CANCELED');
+    }
+    if (installment.fatura.invoicePaymentTxId !== null) {
+      throw new UnprocessableEntityException('INSTALLMENT_FATURA_ALREADY_PAID');
+    }
+
+    const faturaId = installment.faturaId;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.installment.update({
+        where: { id: installmentId },
+        data: { status: 'canceled' },
+      });
+
+      // If all non-canceled installments of this purchase are now canceled → cancel the purchase
+      const remainingActive = await tx.installment.count({
+        where: { purchaseId, status: { not: 'canceled' } },
+      });
+      if (remainingActive === 0) {
+        await tx.creditCardPurchase.update({
+          where: { id: purchaseId },
+          data: { status: 'canceled', canceledAt: new Date() },
+        });
+      }
+
+      await this.faturasService.upsertProjectedTransaction(faturaId, tx);
+    });
+
+    return this.findOne(walletId, cardId, purchaseId);
   }
 
   async cancel(walletId: string, cardId: string, id: string): Promise<PurchaseResponseDto> {
