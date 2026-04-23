@@ -73,7 +73,7 @@ RUN pnpm prisma:generate
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-  CMD sh -c 'wget -qO- "http://localhost:${PORT:-3000}/health" || exit 1'
+  CMD node -e "const http=require('http');const port=process.env.PORT||3000;const req=http.get({host:'127.0.0.1',port,path:'/health',timeout:5000},res=>process.exit(res.statusCode===200?0:1));req.on('error',()=>process.exit(1));req.on('timeout',()=>{req.destroy();process.exit(1);});"
 
 # Run pending migrations then start the API
 CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/src/main.js"]
