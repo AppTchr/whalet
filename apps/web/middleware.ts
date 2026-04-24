@@ -7,7 +7,9 @@ import type { NextRequest } from "next/server";
 const AUTH_COOKIE_NAME = "access_token";
 
 function isProtectedRoute(pathname: string): boolean {
-  if (pathname === "/" || pathname === "/login") return false;
+  if (pathname === "/" || pathname === "/login" || pathname === "/health") {
+    return false;
+  }
   return true;
 }
 
@@ -17,6 +19,7 @@ export function middleware(request: NextRequest) {
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api") ||
+    pathname === "/health" ||
     pathname.includes(".")
   ) {
     return NextResponse.next();
