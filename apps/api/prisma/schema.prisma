@@ -114,7 +114,6 @@ model Wallet {
   transactions          Transaction[]
   creditCards           CreditCard[]
   faturas               Fatura[]
-  installments          Installment[]
   recurringTransactions RecurringTransaction[]
   budgets               Budget[]
 
@@ -198,7 +197,6 @@ model Category {
   wallet                Wallet                 @relation(fields: [walletId], references: [id])
   transactions          Transaction[]
   purchases             CreditCardPurchase[]
-  faturas               Fatura[]
   recurringTransactions RecurringTransaction[]
   budgets               Budget[]
 
@@ -227,37 +225,46 @@ model BankAccount {
 }
 
 model Transaction {
-  id               String            @id @default(uuid())
-  walletId         String
-  categoryId       String?
-  bankAccountId    String?
-  type             TransactionType
-  status           TransactionStatus @default(pending)
-  amount           Decimal           @db.Decimal(14, 2)
-  sign             Int
-  description      String?           @db.VarChar(255)
-  notes            String?           @db.Text
-  dueDate          DateTime          @db.Date
-  paidAt           DateTime?
-  transferGroupId  String?
-  recurrenceId     String?
-  recurrenceIndex  Int?
-  deletedAt        DateTime?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id                  String            @id @default(uuid())
+  walletId            String
+  categoryId          String?
+  bankAccountId       String?
+  type                TransactionType
+  status              TransactionStatus @default(pending)
+  amount              Decimal           @db.Decimal(14, 2)
+  sign                Int
+  description         String?           @db.VarChar(255)
+  notes               String?           @db.Text
+  dueDate             DateTime          @db.Date
+  paidAt              DateTime?
+  transferGroupId     String?
+  recurrenceId        String?
+  recurrenceIndex     Int?
+  // Credit-card unification: a credit_card_purchase transaction belongs to a
+  // fatura and a purchase header that groups all parcelas of the same compra.
+  faturaId            String?
+  purchaseId          String?
+  installmentNumber   Int?
+  totalInstallments   Int?
+  deletedAt           DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
 
   wallet                 Wallet                @relation(fields: [walletId], references: [id])
   category               Category?             @relation(fields: [categoryId], references: [id])
   bankAccount            BankAccount?          @relation(fields: [bankAccountId], references: [id])
   recurringTransaction   RecurringTransaction? @relation(fields: [recurrenceId], references: [id])
+  fatura                 Fatura?               @relation("FaturaInstallmentTx", fields: [faturaId], references: [id])
+  purchase               CreditCardPurchase?   @relation("PurchaseInstallmentTx", fields: [purchaseId], references: [id])
   invoicePaymentFatura   Fatura?               @relation("FaturaPaymentTx")
-  projectedPaymentFatura Fatura?               @relation("FaturaProjectedTx")
 
   @@index([walletId, status])
   @@index([walletId, dueDate])
   @@index([walletId, type])
   @@index([transferGroupId])
   @@index([recurrenceId])
+  @@index([faturaId])
+  @@index([purchaseId])
   @@map("transactions")
 }
 
@@ -305,12 +312,6 @@ model RecurringTransaction {
 // Credit Cards Domain
 // =============================================================================
 
-enum InstallmentStatus {
-  pending
-  paid
-  canceled
-}
-
 enum PurchaseStatus {
   active
   canceled
@@ -340,22 +341,18 @@ model Fatura {
   id                 String    @id @default(uuid())
   cardId             String
   walletId           String
-  categoryId         String?
   referenceMonth     String    @db.VarChar(7)
   closingDate        DateTime  @db.Date
   dueDate            DateTime  @db.Date
   invoicePaymentTxId String?   @unique
-  projectedTxId      String?   @unique
   paidAt             DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
   card             CreditCard    @relation(fields: [cardId], references: [id])
   wallet           Wallet        @relation(fields: [walletId], references: [id])
-  category         Category?     @relation(fields: [categoryId], references: [id])
   invoicePaymentTx Transaction?  @relation("FaturaPaymentTx", fields: [invoicePaymentTxId], references: [id])
-  projectedTx      Transaction?  @relation("FaturaProjectedTx", fields: [projectedTxId], references: [id])
-  installments     Installment[]
+  transactions     Transaction[] @relation("FaturaInstallmentTx")
 
   @@unique([cardId, referenceMonth])
   @@index([walletId, cardId])
@@ -380,37 +377,12 @@ model CreditCardPurchase {
 
   card         CreditCard    @relation(fields: [cardId], references: [id])
   category     Category?     @relation(fields: [categoryId], references: [id])
-  installments Installment[]
+  transactions Transaction[] @relation("PurchaseInstallmentTx")
 
   @@index([walletId, cardId])
   @@index([walletId, status])
   @@index([cardId, purchaseDate])
   @@map("credit_card_purchases")
-}
-
-model Installment {
-  id                String            @id @default(uuid())
-  purchaseId        String
-  faturaId          String
-  cardId            String
-  walletId          String
-  installmentNumber Int
-  amountCents       Int
-  dueDate           DateTime          @db.Date
-  status            InstallmentStatus @default(pending)
-  paidAt            DateTime?
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
-
-  purchase CreditCardPurchase @relation(fields: [purchaseId], references: [id])
-  fatura   Fatura             @relation(fields: [faturaId], references: [id])
-  wallet   Wallet             @relation(fields: [walletId], references: [id])
-
-  @@index([purchaseId])
-  @@index([faturaId, status])
-  @@index([cardId, status])
-  @@index([walletId, status])
-  @@map("installments")
 }
 
 // =============================================================================

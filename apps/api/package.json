@@ -16,7 +16,10 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:migrate:reset": "prisma migrate reset",
     "prisma:seed": "ts-node prisma/seed.ts",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "recon:snapshot": "ts-node scripts/reconciliation/snapshot.ts",
+    "recon:diff": "ts-node scripts/reconciliation/diff.ts",
+    "migrate:exercise-fase2": "ts-node scripts/migration/exercise-fase2-dualwrite.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.3",

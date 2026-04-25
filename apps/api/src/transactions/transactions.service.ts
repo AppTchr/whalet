@@ -424,58 +424,64 @@ export class TransactionsService {
       return this.toDto(updated as RawTransaction);
     }
 
-    // Non-transfer: single update (or atomic fatura promotion for invoice_payment)
-    // FIX SC-3: Include walletId in update where clause
+    // Invoice-payment transactions are paid through the dedicated fatura
+    // endpoint, which handles fatura promotion atomically. Direct /pay on an
+    // invoice_payment is no longer supported — the projected-tx mechanism is
+    // gone (Fase 4 cleanup).
     if (existing.type === TransactionType.invoice_payment) {
-      // Look up a fatura whose projected transaction is this one
-      const fatura = await this.prisma.fatura.findFirst({
-        where: { projectedTxId: id },
-      });
-
-      if (fatura !== null && fatura.invoicePaymentTxId === null) {
-        // Atomically: mark transaction paid + promote fatura + mark installments paid
-        // FIX H-5: Catch unique constraint violation (P2002) from race condition
-        try {
-          await this.prisma.$transaction([
-            this.prisma.transaction.update({
-              where: { id, walletId },
-              data: { status: TransactionStatus.paid, paidAt },
-            }),
-            this.prisma.fatura.update({
-              where: { id: fatura.id },
-              data: {
-                paidAt,
-                invoicePaymentTxId: id,
-                projectedTxId: null,
-              },
-            }),
-            this.prisma.installment.updateMany({
-              where: { faturaId: fatura.id, status: { not: 'canceled' } },
-              data: { status: 'paid', paidAt },
-            }),
-          ]);
-        } catch (e) {
-          if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-            throw new UnprocessableEntityException('FATURA_ALREADY_PAID');
-          }
-          throw e;
-        }
-
-        const updated = await this.prisma.transaction.findFirst({
-          where: { id, walletId, deletedAt: null },
-        });
-
-        if (!updated) {
-          throw new NotFoundException('TRANSACTION_NOT_FOUND');
-        }
-
-        return this.toDto(updated as RawTransaction);
-      }
+      throw new UnprocessableEntityException('USE_FATURA_PAY_ENDPOINT');
     }
 
     const updated = await this.prisma.transaction.update({
       where: { id, walletId },
       data: { status: TransactionStatus.paid, paidAt },
+    });
+
+    return this.toDto(updated as RawTransaction);
+  }
+
+  async unpay(walletId: string, id: string): Promise<TransactionResponseDto> {
+    const existing = await this.prisma.transaction.findFirst({
+      where: { id, walletId, deletedAt: null },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('TRANSACTION_NOT_FOUND');
+    }
+
+    if (existing.status !== TransactionStatus.paid) {
+      throw new UnprocessableEntityException('TRANSACTION_NOT_PAID');
+    }
+
+    if (existing.type === TransactionType.invoice_payment) {
+      throw new UnprocessableEntityException('USE_FATURA_UNPAY_ENDPOINT');
+    }
+
+    if (existing.transferGroupId) {
+      const pair = await this.prisma.transaction.findMany({
+        where: { transferGroupId: existing.transferGroupId, deletedAt: null },
+      });
+      if (pair.length !== 2) {
+        throw new UnprocessableEntityException('TRANSFER_PAIR_INTEGRITY_VIOLATION');
+      }
+      await this.prisma.$transaction(
+        pair.map((t) =>
+          this.prisma.transaction.update({
+            where: { id: t.id },
+            data: { status: TransactionStatus.pending, paidAt: null },
+          }),
+        ),
+      );
+      const updated = await this.prisma.transaction.findFirst({
+        where: { id, walletId, deletedAt: null },
+      });
+      if (!updated) throw new NotFoundException('TRANSACTION_NOT_FOUND');
+      return this.toDto(updated as RawTransaction);
+    }
+
+    const updated = await this.prisma.transaction.update({
+      where: { id, walletId },
+      data: { status: TransactionStatus.pending, paidAt: null },
     });
 
     return this.toDto(updated as RawTransaction);
@@ -541,7 +547,8 @@ export class TransactionsService {
       return this.toDto(updated as RawTransaction);
     }
 
-    // FIX H-3: invoice_payment cancellation must reset fatura state atomically
+    // invoice_payment cancellation must reset fatura state atomically AND
+    // revert each parcela-Transaction back to pending.
     if (
       existing.type === TransactionType.invoice_payment &&
       existing.status === TransactionStatus.paid
@@ -560,9 +567,13 @@ export class TransactionsService {
             where: { id: fatura.id },
             data: { invoicePaymentTxId: null, paidAt: null },
           }),
-          this.prisma.installment.updateMany({
-            where: { faturaId: fatura.id, status: { not: 'canceled' } },
-            data: { status: 'pending', paidAt: null },
+          this.prisma.transaction.updateMany({
+            where: {
+              faturaId: fatura.id,
+              type: TransactionType.credit_card_purchase,
+              status: TransactionStatus.paid,
+            },
+            data: { status: TransactionStatus.pending, paidAt: null },
           }),
         ]);
 
@@ -593,22 +604,49 @@ export class TransactionsService {
   }
 
   async softDelete(walletId: string, id: string): Promise<void> {
-    // FIX SM-2: Use atomic updateMany to eliminate TOCTOU race condition
-    const result = await this.prisma.transaction.updateMany({
-      where: { id, walletId, deletedAt: null },
-      data: { deletedAt: new Date() },
+    const existing = await this.prisma.transaction.findFirst({
+      where: { id, walletId },
     });
 
-    if (result.count === 0) {
-      // Could be not found OR already deleted — check which
-      const existing = await this.prisma.transaction.findFirst({
-        where: { id, walletId },
-      });
-      if (!existing) {
-        throw new NotFoundException('TRANSACTION_NOT_FOUND');
-      }
+    if (!existing) {
+      throw new NotFoundException('TRANSACTION_NOT_FOUND');
+    }
+    if (existing.deletedAt) {
       throw new UnprocessableEntityException('TRANSACTION_ALREADY_DELETED');
     }
+
+    if (existing.type === TransactionType.invoice_payment) {
+      const linkedFatura = await this.prisma.fatura.findFirst({
+        where: { invoicePaymentTxId: id },
+      });
+      if (linkedFatura) {
+        throw new UnprocessableEntityException('INVOICE_PAYMENT_LINKED_TO_FATURA');
+      }
+    }
+
+    if (existing.transferGroupId) {
+      const pair = await this.prisma.transaction.findMany({
+        where: { transferGroupId: existing.transferGroupId, deletedAt: null },
+      });
+      if (pair.length !== 2) {
+        throw new UnprocessableEntityException('TRANSFER_PAIR_INTEGRITY_VIOLATION');
+      }
+      const now = new Date();
+      await this.prisma.$transaction(
+        pair.map((t) =>
+          this.prisma.transaction.update({
+            where: { id: t.id },
+            data: { deletedAt: now },
+          }),
+        ),
+      );
+      return;
+    }
+
+    await this.prisma.transaction.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
   }
 
   // ---------------------------------------------------------------------------

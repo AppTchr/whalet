@@ -57,6 +57,17 @@ export class FaturasController {
     return this.faturasService.pay(walletId, cardId, faturaId, dto);
   }
 
+  @Post(':faturaId/unpay')
+  @RequireWalletRole('editor')
+  @ApiOperation({ summary: 'Desmarcar fatura como paga (reverte invoice_payment)' })
+  unpay(
+    @Param('walletId') walletId: string,
+    @Param('cardId') cardId: string,
+    @Param('faturaId') faturaId: string,
+  ) {
+    return this.faturasService.unpay(walletId, cardId, faturaId);
+  }
+
   @Patch(':faturaId/category')
   @RequireWalletRole('editor')
   @ApiOperation({ summary: 'Atribuir ou remover categoria da fatura' })

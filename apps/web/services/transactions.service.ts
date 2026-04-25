@@ -64,6 +64,17 @@ export async function payTransaction(
   return response.data;
 }
 
+export async function unpayTransaction(
+  walletId: string,
+  id: string
+): Promise<Transaction> {
+  const response = await api.post<Transaction>(
+    `/wallets/${walletId}/transactions/${id}/unpay`,
+    {}
+  );
+  return response.data;
+}
+
 export async function cancelTransaction(
   walletId: string,
   id: string,

@@ -52,6 +52,17 @@ export async function payFatura(
   return response.data;
 }
 
+export async function unpayFatura(
+  walletId: string,
+  cardId: string,
+  faturaId: string
+): Promise<void> {
+  await api.post(
+    `/wallets/${walletId}/cards/${cardId}/faturas/${faturaId}/unpay`,
+    {}
+  );
+}
+
 export async function updateFaturaCategory(
   walletId: string,
   cardId: string,

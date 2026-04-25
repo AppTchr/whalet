@@ -19,9 +19,10 @@ import {
   Pencil,
   Receipt,
   Repeat2,
+  Trash2,
 } from "lucide-react";
-import { useWallet } from "@/lib/hooks/use-wallet";
-import { useTransactions, useCreateTransaction, useUpdateTransaction, usePayTransaction, useCancelTransaction } from "@/lib/hooks/use-transactions";
+import { useWallet, useWallets } from "@/lib/hooks/use-wallet";
+import { useTransactions, useCreateTransaction, useUpdateTransaction, usePayTransaction, useUnpayTransaction, useCancelTransaction, useDeleteTransaction } from "@/lib/hooks/use-transactions";
 import { useBankAccounts } from "@/lib/hooks/use-bank-accounts";
 import { useCategories } from "@/lib/hooks/use-categories";
 import { useCards } from "@/lib/hooks/use-cards";
@@ -701,8 +702,10 @@ function TransactionListItem({
   categoryName,
   canWrite,
   onPay,
+  onUnpay,
   onEdit,
   onCancel,
+  onDelete,
   index,
 }: {
   tx: Transaction;
@@ -710,14 +713,18 @@ function TransactionListItem({
   categoryName?: string;
   canWrite: boolean;
   onPay: (id: string) => void;
+  onUnpay: (tx: Transaction) => void;
   onEdit: (tx: Transaction) => void;
   onCancel: (id: string) => void;
+  onDelete: (tx: Transaction) => void;
   index: number;
 }) {
   const isIncome = tx.sign === 1;
   const isExpense = tx.sign === -1;
   const isPending = tx.status === "pending";
+  const isPaid = tx.status === "paid";
   const isCanceled = tx.status === "canceled";
+  const isInvoicePayment = tx.type === "invoice_payment";
   const staggerClass = `stagger-${Math.min(index + 1, 8)}`;
 
   return (
@@ -782,9 +789,9 @@ function TransactionListItem({
       </Badge>
 
       {/* Actions */}
-      {canWrite && !isCanceled && (
+      {canWrite && (
         <div className="flex gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-all duration-150 translate-x-1 group-hover:translate-x-0">
-          {isPending && (
+          {!isCanceled && isPending && (
             <Button
               size="sm"
               variant="outline"
@@ -794,26 +801,301 @@ function TransactionListItem({
               Pagar
             </Button>
           )}
+          {isPaid && !isInvoicePayment && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs text-amber-700 border-amber-200 hover:bg-amber-50 font-medium"
+              onClick={() => onUnpay(tx)}
+              title="Desmarcar pago"
+            >
+              Desmarcar
+            </Button>
+          )}
+          {!isCanceled && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+              onClick={() => onEdit(tx)}
+              title="Editar"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          )}
+          {!isCanceled && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs text-muted-foreground hover:text-destructive px-2"
+              onClick={() => onCancel(tx.id)}
+            >
+              Cancelar
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
-            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-            onClick={() => onEdit(tx)}
-            title="Editar"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+            onClick={() => onDelete(tx)}
+            title="Excluir"
           >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 text-xs text-muted-foreground hover:text-destructive px-2"
-            onClick={() => onCancel(tx.id)}
-          >
-            Cancelar
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Transfer Dialog ──────────────────────────────────────────────────────────
+
+const transferSchema = z.object({
+  fromBankAccountId: z.string().min(1, "Conta de origem é obrigatória"),
+  toWalletId: z.string().min(1, "Selecione a carteira de destino"),
+  toBankAccountId: z.string().min(1, "Selecione a conta de destino"),
+  amount: z.coerce.number({ invalid_type_error: "Informe um valor válido" }).positive("O valor deve ser positivo"),
+  description: z.string().min(1, "Descrição é obrigatória"),
+  dueDate: z.string().min(1, "Data é obrigatória"),
+  status: z.enum(["pending", "paid"] as const),
+  notes: z.string().optional(),
+});
+type TransferFormValues = z.infer<typeof transferSchema>;
+
+function TransferDialog({
+  walletId,
+  open,
+  onOpenChange,
+}: {
+  walletId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { data: fromAccountsRaw } = useBankAccounts(walletId);
+  const fromAccounts = fromAccountsRaw?.filter((a) => !a.isArchived);
+  const { data: wallets } = useWallets();
+  const otherWallets = wallets?.filter((w) => w.id !== walletId);
+
+  const { mutate: createTx, isPending } = useCreateTransaction(walletId);
+
+  const form = useForm<TransferFormValues>({
+    resolver: zodResolver(transferSchema),
+    defaultValues: {
+      fromBankAccountId: "",
+      toWalletId: "",
+      toBankAccountId: "",
+      amount: 0,
+      description: "Transferência",
+      dueDate: new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }),
+      status: "paid",
+      notes: "",
+    },
+  });
+
+  const toWalletId = form.watch("toWalletId");
+  const { data: toAccountsRaw } = useBankAccounts(toWalletId);
+  const toAccounts = toAccountsRaw?.filter((a) => !a.isArchived);
+
+  useEffect(() => {
+    if (!open) return;
+    form.reset({
+      fromBankAccountId: "",
+      toWalletId: "",
+      toBankAccountId: "",
+      amount: 0,
+      description: "Transferência",
+      dueDate: new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }),
+      status: "paid",
+      notes: "",
+    });
+  }, [open, form]);
+
+  function onSubmit(values: TransferFormValues) {
+    createTx(
+      {
+        type: "transfer_out",
+        description: values.description,
+        amount: values.amount,
+        dueDate: values.dueDate,
+        status: values.status,
+        bankAccountId: values.fromBankAccountId,
+        counterpartBankAccountId: values.toBankAccountId,
+        notes: values.notes || undefined,
+      },
+      {
+        onSuccess: () => {
+          toast.success("Transferência criada.");
+          onOpenChange(false);
+        },
+        onError: (err: unknown) => {
+          const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+          if (msg === "FORBIDDEN_TRANSFER_DESTINATION") {
+            toast.error("Você não tem acesso à carteira de destino.");
+          } else if (msg === "TRANSFER_COUNTERPART_BANK_ACCOUNT_NOT_FOUND") {
+            toast.error("Conta de destino não encontrada.");
+          } else {
+            toast.error("Não foi possível criar a transferência.");
+          }
+        },
+      }
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ArrowLeftRight className="h-4 w-4 text-brand-primary" />
+            Nova transferência
+          </DialogTitle>
+        </DialogHeader>
+
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label>Origem (conta desta carteira)</Label>
+            <Controller
+              name="fromBankAccountId"
+              control={form.control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecione a conta de origem" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(!fromAccounts || fromAccounts.length === 0) ? (
+                      <SelectItem value="_none" disabled>Nenhuma conta disponível</SelectItem>
+                    ) : fromAccounts.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name}{a.institution ? ` — ${a.institution}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+            {form.formState.errors.fromBankAccountId && (
+              <p className="text-xs text-destructive">{form.formState.errors.fromBankAccountId.message}</p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Carteira de destino</Label>
+            <Controller
+              name="toWalletId"
+              control={form.control}
+              render={({ field }) => (
+                <Select
+                  value={field.value}
+                  onValueChange={(v) => {
+                    field.onChange(v);
+                    form.setValue("toBankAccountId", "");
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Selecione a carteira" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(!otherWallets || otherWallets.length === 0) ? (
+                      <SelectItem value="_none" disabled>Nenhuma outra carteira</SelectItem>
+                    ) : otherWallets.map((w) => (
+                      <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+            {form.formState.errors.toWalletId && (
+              <p className="text-xs text-destructive">{form.formState.errors.toWalletId.message}</p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Conta de destino</Label>
+            <Controller
+              name="toBankAccountId"
+              control={form.control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange} disabled={!toWalletId}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder={toWalletId ? "Selecione a conta" : "Escolha a carteira primeiro"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(!toAccounts || toAccounts.length === 0) ? (
+                      <SelectItem value="_none" disabled>Nenhuma conta disponível</SelectItem>
+                    ) : toAccounts.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name}{a.institution ? ` — ${a.institution}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+            {form.formState.errors.toBankAccountId && (
+              <p className="text-xs text-destructive">{form.formState.errors.toBankAccountId.message}</p>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="transfer-description">Descrição</Label>
+            <Input id="transfer-description" className="w-full" {...form.register("description")} />
+            {form.formState.errors.description && (
+              <p className="text-xs text-destructive">{form.formState.errors.description.message}</p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="transfer-amount">Valor (R$)</Label>
+              <Input id="transfer-amount" type="number" step="0.01" min="0.01" className="w-full" {...form.register("amount")} />
+              {form.formState.errors.amount && (
+                <p className="text-xs text-destructive">{form.formState.errors.amount.message}</p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="transfer-date">Data</Label>
+              <Input id="transfer-date" type="date" className="w-full" {...form.register("dueDate")} />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Status</Label>
+            <Controller
+              name="status"
+              control={form.control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="paid">Já realizada</SelectItem>
+                    <SelectItem value="pending">Agendada</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="transfer-notes">Observações (opcional)</Label>
+            <Textarea id="transfer-notes" rows={2} className="w-full" {...form.register("notes")} />
+          </div>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)}>
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              className="w-full sm:w-auto bg-brand-primary hover:bg-brand-primary/90"
+              disabled={isPending}
+            >
+              {isPending ? "Enviando..." : "Transferir"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -879,6 +1161,7 @@ export default function TransactionsPage() {
   const walletId = params?.walletId as string;
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
   const [editTx, setEditTx] = useState<Transaction | null>(null);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -913,7 +1196,43 @@ export default function TransactionsPage() {
 
   const { data, isLoading } = useTransactions(walletId, queryParams);
   const { mutate: payTx } = usePayTransaction(walletId);
+  const { mutate: unpayTx } = useUnpayTransaction(walletId);
   const { mutate: cancelTx } = useCancelTransaction(walletId);
+  const { mutate: deleteTx } = useDeleteTransaction(walletId);
+
+  function handleUnpayClick(tx: Transaction) {
+    const isTransfer = tx.type === "transfer_in" || tx.type === "transfer_out";
+    const msg = isTransfer
+      ? "Desmarcar este pagamento? Ambas as pernas da transferência voltarão para 'pendente'."
+      : "Desmarcar este pagamento? A transação voltará para 'pendente'.";
+    if (!confirm(msg)) return;
+    unpayTx(tx.id, {
+      onSuccess: () => toast.success("Pagamento desmarcado."),
+      onError: (err: unknown) => {
+        const errMsg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+        if (errMsg === "USE_FATURA_UNPAY_ENDPOINT") {
+          toast.error("Para desmarcar fatura, use o botão da fatura no cartão.");
+        } else {
+          toast.error("Não foi possível desmarcar o pagamento.");
+        }
+      },
+    });
+  }
+
+  function handleDeleteClick(tx: Transaction) {
+    if (!confirm("Excluir esta transação? Esta ação remove o registro do histórico.")) return;
+    deleteTx(tx.id, {
+      onSuccess: () => toast.success("Transação excluída."),
+      onError: (err: unknown) => {
+        const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+        if (msg === "INVOICE_PAYMENT_LINKED_TO_FATURA") {
+          toast.error("Desmarque o pagamento da fatura antes de excluir.");
+        } else {
+          toast.error("Não foi possível excluir a transação.");
+        }
+      },
+    });
+  }
 
   const currencyCode = wallet?.currencyCode ?? "BRL";
   const categoryMap = new Map(categories?.map((c) => [c.id, c.name]) ?? []);
@@ -992,13 +1311,23 @@ export default function TransactionsPage() {
           </p>
         </div>
         {canWrite && (
-          <Button
-            className="gap-2 min-h-10 bg-brand-primary hover:bg-brand-primary/90 shadow-sm shadow-brand-primary/25 transition-all hover:shadow-md"
-            onClick={() => setDialogOpen(true)}
-          >
-            <Plus className="h-4 w-4" />
-            Nova transação
-          </Button>
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              variant="outline"
+              className="gap-2 min-h-10"
+              onClick={() => setTransferOpen(true)}
+            >
+              <ArrowLeftRight className="h-4 w-4" />
+              Transferir
+            </Button>
+            <Button
+              className="gap-2 min-h-10 bg-brand-primary hover:bg-brand-primary/90 shadow-sm shadow-brand-primary/25 transition-all hover:shadow-md"
+              onClick={() => setDialogOpen(true)}
+            >
+              <Plus className="h-4 w-4" />
+              Nova transação
+            </Button>
+          </div>
         )}
       </div>
 
@@ -1211,6 +1540,8 @@ export default function TransactionsPage() {
                   const t = data.transactions.find((x) => x.id === id);
                   if (t) handleCancelClick(t);
                 }}
+                onUnpay={handleUnpayClick}
+                onDelete={handleDeleteClick}
               />
             ))}
           </div>
@@ -1257,6 +1588,12 @@ export default function TransactionsPage() {
         walletId={walletId}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
+      />
+
+      <TransferDialog
+        walletId={walletId}
+        open={transferOpen}
+        onOpenChange={setTransferOpen}
       />
 
       {/* Edit — single occurrence */}

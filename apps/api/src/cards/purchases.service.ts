@@ -142,17 +142,21 @@ export class PurchasesService {
           installmentFaturas.push({ faturaId: fatura.id, dueDate, amountCents });
         }
 
-        // 5. Credit limit check — card is locked, exposure is consistent
+        // 5. Credit limit check — card is locked, exposure is consistent.
+        // Fase 3: exposure now sourced from Transaction (credit_card_purchase
+        // rows in non-paid faturas).
         if (card.creditLimitCents !== null) {
-          const agg = await tx.installment.aggregate({
+          const agg = await tx.transaction.aggregate({
             where: {
-              cardId,
+              type: 'credit_card_purchase',
               status: 'pending',
+              deletedAt: null,
+              purchase: { cardId },
               fatura: { invoicePaymentTxId: null },
             },
-            _sum: { amountCents: true },
+            _sum: { amount: true },
           });
-          const openExposure = agg._sum.amountCents ?? 0;
+          const openExposure = Math.round(Number(agg._sum.amount ?? 0) * 100);
           const available = card.creditLimitCents - openExposure;
 
           if (dto.totalAmountCents > available) {
@@ -174,26 +178,23 @@ export class PurchasesService {
           },
         });
 
-        await tx.installment.createMany({
+        // 6. Materialize each parcela as a Transaction (type=credit_card_purchase, sign=0).
+        await tx.transaction.createMany({
           data: installmentFaturas.map(({ faturaId, dueDate, amountCents }, idx) => ({
-            purchaseId: newPurchase.id,
-            faturaId,
-            cardId,
             walletId,
-            installmentNumber: idx + 1,
-            amountCents,
+            type: 'credit_card_purchase' as const,
+            status: 'pending' as const,
+            amount: amountCents / 100,
+            sign: 0,
+            description: `${dto.description} (${idx + 1}/${dto.installmentCount})`,
             dueDate,
+            categoryId: dto.categoryId ?? null,
+            faturaId,
+            purchaseId: newPurchase.id,
+            installmentNumber: idx + 1,
+            totalInstallments: dto.installmentCount,
           })),
         });
-
-        // 7. Upsert the projected transaction for each affected fatura.
-        // Runs inside the same DB transaction so the update is atomic with installment creation.
-        // Deduplicate faturaIds — a purchase with installmentCount=1 touches exactly one fatura,
-        // but multi-installment purchases can land in separate faturas (one per cycle).
-        const uniqueFaturaIds = [...new Set(installmentFaturas.map((f) => f.faturaId))];
-        for (const faturaId of uniqueFaturaIds) {
-          await this.faturasService.upsertProjectedTransaction(faturaId, tx);
-        }
 
         return newPurchase;
       },
@@ -231,13 +232,14 @@ export class PurchasesService {
       cardId,
       walletId,
       ...(status && { status: status as 'active' | 'canceled' }),
-      ...(faturaId && { installments: { some: { faturaId } } }),
+      ...(faturaId && { transactions: { some: { faturaId } } }),
     };
 
     const purchases = await this.prisma.creditCardPurchase.findMany({
       where,
       include: {
-        installments: {
+        transactions: {
+          where: { deletedAt: null, type: 'credit_card_purchase' },
           include: { fatura: { select: { closingDate: true } } },
           orderBy: { installmentNumber: 'asc' },
         },
@@ -255,7 +257,8 @@ export class PurchasesService {
     const purchase = await this.prisma.creditCardPurchase.findFirst({
       where: { id, cardId, walletId },
       include: {
-        installments: {
+        transactions: {
+          where: { deletedAt: null, type: 'credit_card_purchase' },
           include: { fatura: { select: { closingDate: true } } },
           orderBy: { installmentNumber: 'asc' },
         },
@@ -304,32 +307,41 @@ export class PurchasesService {
     walletId: string,
     cardId: string,
     purchaseId: string,
-    installmentId: string,
+    installmentTxId: string,
   ): Promise<PurchaseResponseDto> {
-    const installment = await this.prisma.installment.findFirst({
-      where: { id: installmentId, purchaseId, cardId, walletId },
+    const installmentTx = await this.prisma.transaction.findFirst({
+      where: {
+        id: installmentTxId,
+        purchaseId,
+        walletId,
+        type: 'credit_card_purchase',
+        deletedAt: null,
+      },
       include: { fatura: true },
     });
 
-    if (!installment) throw new NotFoundException('INSTALLMENT_NOT_FOUND');
-    if (installment.status === 'canceled') {
+    if (!installmentTx) throw new NotFoundException('INSTALLMENT_NOT_FOUND');
+    if (installmentTx.status === 'canceled') {
       throw new UnprocessableEntityException('INSTALLMENT_ALREADY_CANCELED');
     }
-    if (installment.fatura.invoicePaymentTxId !== null) {
+    if (installmentTx.fatura?.invoicePaymentTxId) {
       throw new UnprocessableEntityException('INSTALLMENT_FATURA_ALREADY_PAID');
     }
 
-    const faturaId = installment.faturaId;
-
     await this.prisma.$transaction(async (tx) => {
-      await tx.installment.update({
-        where: { id: installmentId },
+      await tx.transaction.update({
+        where: { id: installmentTxId },
         data: { status: 'canceled' },
       });
 
-      // If all non-canceled installments of this purchase are now canceled → cancel the purchase
-      const remainingActive = await tx.installment.count({
-        where: { purchaseId, status: { not: 'canceled' } },
+      // If every parcela of this purchase is now canceled → cancel the header.
+      const remainingActive = await tx.transaction.count({
+        where: {
+          purchaseId,
+          type: 'credit_card_purchase',
+          status: { not: 'canceled' },
+          deletedAt: null,
+        },
       });
       if (remainingActive === 0) {
         await tx.creditCardPurchase.update({
@@ -337,8 +349,6 @@ export class PurchasesService {
           data: { status: 'canceled', canceledAt: new Date() },
         });
       }
-
-      await this.faturasService.upsertProjectedTransaction(faturaId, tx);
     });
 
     return this.findOne(walletId, cardId, purchaseId);
@@ -348,8 +358,9 @@ export class PurchasesService {
     const purchase = await this.prisma.creditCardPurchase.findFirst({
       where: { id, cardId, walletId },
       include: {
-        installments: {
-          include: { fatura: true },
+        transactions: {
+          where: { deletedAt: null, type: 'credit_card_purchase' },
+          include: { fatura: { select: { invoicePaymentTxId: true } } },
         },
       },
     });
@@ -359,22 +370,16 @@ export class PurchasesService {
       throw new UnprocessableEntityException('PURCHASE_ALREADY_CANCELED');
     }
 
-    // Block if any installment belongs to a paid fatura
-    const hasPaidFatura = purchase.installments.some(
-      (i) => i.fatura.invoicePaymentTxId !== null,
+    const hasPaidFatura = purchase.transactions.some(
+      (t) => t.fatura?.invoicePaymentTxId !== null,
     );
     if (hasPaidFatura) {
       throw new UnprocessableEntityException('PURCHASE_HAS_PAID_INSTALLMENTS');
     }
 
-    // Collect the unique faturaIds affected by this cancellation before mutating
-    const affectedFaturaIds = [
-      ...new Set(purchase.installments.map((i) => i.faturaId)),
-    ];
-
     await this.prisma.$transaction(async (tx) => {
-      await tx.installment.updateMany({
-        where: { purchaseId: id },
+      await tx.transaction.updateMany({
+        where: { purchaseId: id, type: 'credit_card_purchase' },
         data: { status: 'canceled' },
       });
 
@@ -382,12 +387,6 @@ export class PurchasesService {
         where: { id },
         data: { status: 'canceled', canceledAt: new Date() },
       });
-
-      // Recalculate the projected transaction for each affected fatura.
-      // If the fatura now has zero non-canceled installments, the projected tx is canceled.
-      for (const faturaId of affectedFaturaIds) {
-        await this.faturasService.upsertProjectedTransaction(faturaId, tx);
-      }
     });
 
     return this.findOne(walletId, cardId, id);
@@ -411,14 +410,14 @@ export class PurchasesService {
     canceledAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
-    installments: Array<{
+    transactions: Array<{
       id: string;
-      installmentNumber: number;
-      amountCents: number;
-      faturaId: string;
+      installmentNumber: number | null;
+      amount: Prisma.Decimal;
+      faturaId: string | null;
       dueDate: Date;
       status: string;
-      fatura: { closingDate: Date };
+      fatura: { closingDate: Date } | null;
     }>;
   }): PurchaseResponseDto {
     return {
@@ -433,15 +432,17 @@ export class PurchasesService {
       notes: purchase.notes,
       status: purchase.status,
       canceledAt: purchase.canceledAt,
-      installments: purchase.installments.map((i): InstallmentSummaryDto => ({
-        id: i.id,
-        installmentNumber: i.installmentNumber,
-        amountCents: i.amountCents,
-        faturaId: i.faturaId,
-        faturaClosingDate: i.fatura.closingDate,
-        dueDate: i.dueDate,
-        status: i.status,
-      })),
+      installments: purchase.transactions
+        .filter((t) => t.installmentNumber !== null && t.faturaId !== null && t.fatura !== null)
+        .map((t): InstallmentSummaryDto => ({
+          id: t.id,
+          installmentNumber: t.installmentNumber as number,
+          amountCents: Math.round(Number(t.amount) * 100),
+          faturaId: t.faturaId as string,
+          faturaClosingDate: (t.fatura as { closingDate: Date }).closingDate,
+          dueDate: t.dueDate,
+          status: t.status,
+        })),
       createdAt: purchase.createdAt,
       updatedAt: purchase.updatedAt,
     };

@@ -7,7 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateCardDto } from './dto/create-card.dto';
 import { UpdateCardDto } from './dto/update-card.dto';
 import { CardResponseDto, CardListResponseDto } from './dto/card-response.dto';
-import { CreditCard } from '@prisma/client';
+import { CreditCard, TransactionStatus, TransactionType } from '@prisma/client';
 
 @Injectable()
 export class CardsService {
@@ -66,6 +66,14 @@ export class CardsService {
 
     if (existing.isArchived && dto.isArchived !== false) {
       throw new UnprocessableEntityException('CARD_ALREADY_ARCHIVED');
+    }
+
+    if ('creditLimitCents' in dto && dto.creditLimitCents !== null && dto.creditLimitCents !== undefined) {
+      // Fase 3: open exposure now sourced from Transaction (type=credit_card_purchase).
+      const usedCents = await this.computeOpenExposureCents(id);
+      if (dto.creditLimitCents < usedCents) {
+        throw new UnprocessableEntityException('CARD_LIMIT_BELOW_USED_CREDIT');
+      }
     }
 
     const updated = await this.prisma.creditCard.update({
@@ -136,21 +144,7 @@ export class CardsService {
     let availableCreditCents: number | null = null;
 
     if (card.creditLimitCents !== null) {
-      // Open exposure = sum of pending installments in open/closed/overdue faturas.
-      // Paid faturas (invoicePaymentTxId IS NOT NULL) are excluded — their installments
-      // are no longer consuming credit, so the limit is restored automatically.
-      const result = await this.prisma.installment.aggregate({
-        where: {
-          cardId: card.id,
-          status: 'pending',
-          fatura: {
-            invoicePaymentTxId: null,
-          },
-        },
-        _sum: { amountCents: true },
-      });
-
-      usedCreditCents = result._sum.amountCents ?? 0;
+      usedCreditCents = await this.computeOpenExposureCents(card.id);
       availableCreditCents = card.creditLimitCents - usedCreditCents;
     }
 
@@ -167,5 +161,25 @@ export class CardsService {
       createdAt: card.createdAt,
       updatedAt: card.updatedAt,
     };
+  }
+
+  /**
+   * Open credit-card exposure (Fase 3): sum of credit_card_purchase
+   * Transactions on this card whose fatura is not yet paid. Paid faturas
+   * are excluded — their parcelas have been settled and no longer consume
+   * the limit.
+   */
+  private async computeOpenExposureCents(cardId: string): Promise<number> {
+    const result = await this.prisma.transaction.aggregate({
+      where: {
+        type: TransactionType.credit_card_purchase,
+        status: TransactionStatus.pending,
+        deletedAt: null,
+        purchase: { cardId },
+        fatura: { invoicePaymentTxId: null },
+      },
+      _sum: { amount: true },
+    });
+    return Math.round(Number(result._sum.amount ?? 0) * 100);
   }
 }

@@ -96,7 +96,7 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       {/* Wallet switcher */}
-      <div className="px-3 py-3 border-b border-neutral-border">
+      <div className="px-3 py-3 border-b border-border/80">
         <WalletSwitcher />
       </div>
 
@@ -115,8 +115,8 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
                   "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium",
                   "transition-all duration-150",
                   active
-                    ? "bg-brand-primary-100 text-brand-primary shadow-sm"
-                    : "text-muted-foreground hover:bg-neutral-surface hover:text-foreground hover:translate-x-0.5"
+                    ? "bg-secondary text-brand-primary shadow-[inset_0_0_0_1px_rgba(30,114,219,0.12)]"
+                    : "text-muted-foreground hover:bg-secondary/80 hover:text-foreground hover:translate-x-0.5"
                 )}
               >
                 <item.icon
@@ -141,8 +141,8 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
                 "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium",
                 "transition-all duration-150",
                 pathname === "/wallets"
-                  ? "bg-brand-primary-100 text-brand-primary shadow-sm"
-                  : "text-muted-foreground hover:bg-neutral-surface hover:text-foreground hover:translate-x-0.5"
+                  ? "bg-secondary text-brand-primary shadow-[inset_0_0_0_1px_rgba(30,114,219,0.12)]"
+                  : "text-muted-foreground hover:bg-secondary/80 hover:text-foreground hover:translate-x-0.5"
               )}
             >
               <Wallet className="h-4 w-4 shrink-0" />
@@ -155,7 +155,7 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
       {/* User section */}
       <div className="px-3 pb-4 space-y-2">
         <Separator className="mb-3" />
-        <div className="flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-neutral-surface transition-colors duration-150">
+        <div className="flex items-center gap-3 px-2 py-1.5 rounded-none hover:bg-secondary/70 transition-colors duration-150">
           <Avatar className="h-8 w-8 shrink-0">
             <AvatarFallback className="bg-brand-primary-100 text-brand-primary text-xs font-semibold">
               {user ? getInitials(user.email) : "?"}
@@ -192,8 +192,14 @@ function NavContent({ onNavigate }: { onNavigate?: () => void }) {
 
 function LogoBar() {
   return (
-    <div className="px-4 py-4 border-b border-neutral-border shrink-0">
-      <Image src="/icon.png" width={224} height={60} alt="whalet" className="w-full h-auto" />
+    <div className="px-4 py-4 border-b border-border/80 shrink-0 bg-[#fbfdff] backdrop-blur-sm">
+      <Image
+        src="/icon.png"
+        width={224}
+        height={60}
+        alt="whalet"
+        className="w-full h-auto"
+      />
     </div>
   );
 }
@@ -206,7 +212,7 @@ export function Sidebar() {
   return (
     <TooltipProvider delayDuration={0}>
       {/* Desktop sidebar — hidden on mobile */}
-      <aside className="hidden md:flex flex-col w-64 h-screen bg-white border-r border-neutral-border shrink-0">
+      <aside className="hidden md:flex flex-col w-64 h-screen bg-white/82 backdrop-blur-md border-r border-border/80 shrink-0">
         <LogoBar />
         <NavContent />
       </aside>
@@ -222,19 +228,19 @@ export function Sidebar() {
       {/* Mobile: slide-in drawer */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex flex-col w-72 bg-white border-r border-neutral-border",
+          "fixed inset-y-0 left-0 z-50 flex flex-col w-72 bg-white/92 border-r border-border/80 backdrop-blur-md",
           "transition-transform duration-300 ease-in-out md:hidden shadow-xl",
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-border shrink-0">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border/80 shrink-0">
           <div className="flex items-center gap-2.5">
             <Image src="/icon.png" width={120} height={32} alt="whalet" className="shrink-0" />
           </div>
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 hover:bg-neutral-surface transition-colors duration-150"
+            className="h-8 w-8 hover:bg-secondary transition-colors duration-150"
             onClick={() => setMobileOpen(false)}
           >
             <X className="h-4 w-4" />
@@ -246,11 +252,11 @@ export function Sidebar() {
       </aside>
 
       {/* Mobile: top header bar with hamburger — only visible on mobile */}
-      <div className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 h-14 bg-white/90 backdrop-blur-sm border-b border-neutral-border">
+      <div className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 h-14 bg-white/88 backdrop-blur-md border-b border-border/80">
         <Button
           variant="ghost"
           size="icon"
-          className="h-9 w-9 hover:bg-neutral-surface transition-colors duration-150"
+          className="h-9 w-9 hover:bg-secondary transition-colors duration-150"
           onClick={() => setMobileOpen(true)}
         >
           <Menu className="h-5 w-5" />

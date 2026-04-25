@@ -121,6 +121,17 @@ export class TransactionsController {
     return this.transactionsService.pay(walletId, transactionId, dto);
   }
 
+  @Post(':transactionId/unpay')
+  @RequireWalletRole('editor')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Desmarcar pagamento (volta para pendente)' })
+  async unpay(
+    @Param('walletId') walletId: string,
+    @Param('transactionId') transactionId: string,
+  ): Promise<TransactionResponseDto> {
+    return this.transactionsService.unpay(walletId, transactionId);
+  }
+
   @Post(':transactionId/cancel')
   @RequireWalletRole('editor')
   @HttpCode(HttpStatus.OK)

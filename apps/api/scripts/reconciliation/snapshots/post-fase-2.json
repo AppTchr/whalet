@@ -1,0 +1,155 @@
+{
+  "label": "post-fase-2",
+  "capturedAt": "2026-04-25T05:27:22.394Z",
+  "schemaHints": {
+    "hasInstallmentTable": true,
+    "transactionHasFaturaId": true,
+    "transactionHasPurchaseId": true
+  },
+  "walletBalances": [
+    {
+      "walletId": "5dd067ca-d38b-4e3d-92fb-d5910b8a0b61",
+      "walletName": "Finanças Pessoal",
+      "confirmedCents": 0,
+      "projectedCents": 0
+    },
+    {
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "walletName": "Carteira Profissional",
+      "confirmedCents": 0,
+      "projectedCents": 0
+    }
+  ],
+  "faturaTotals": [
+    {
+      "faturaId": "2719500b-b365-42f7-b470-3ef66f9e85b9",
+      "cardId": "63d99432-8092-4214-af66-9ca195a0f280",
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "referenceMonth": "2026-07",
+      "invoicePaymentTxId": null,
+      "totalFromInstallmentsCents": 0,
+      "totalFromTxCents": 0,
+      "installmentCount": 0
+    },
+    {
+      "faturaId": "88e097b7-f693-4a10-b7ba-5258e930ff1d",
+      "cardId": "63d99432-8092-4214-af66-9ca195a0f280",
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "referenceMonth": "2026-05",
+      "invoicePaymentTxId": null,
+      "totalFromInstallmentsCents": 0,
+      "totalFromTxCents": 0,
+      "installmentCount": 0
+    },
+    {
+      "faturaId": "a32202d1-7742-4ad8-b196-db42b38aaa6f",
+      "cardId": "63d99432-8092-4214-af66-9ca195a0f280",
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "referenceMonth": "2026-06",
+      "invoicePaymentTxId": null,
+      "totalFromInstallmentsCents": 0,
+      "totalFromTxCents": 0,
+      "installmentCount": 0
+    }
+  ],
+  "categoryBreakdown": [
+    {
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "yearMonth": "2026-06",
+      "categoryId": "5c0cc4d1-0d48-40a9-aa5d-23ed8820e93f",
+      "type": "credit_card_purchase",
+      "status": "canceled",
+      "totalCents": 3210,
+      "count": 1
+    },
+    {
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "yearMonth": "2026-06",
+      "categoryId": "68cdc581-0d21-4f1c-b00f-11719f2673bd",
+      "type": "credit_card_purchase",
+      "status": "canceled",
+      "totalCents": 17084,
+      "count": 2
+    },
+    {
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "yearMonth": "2026-06",
+      "categoryId": null,
+      "type": "credit_card_purchase",
+      "status": "canceled",
+      "totalCents": 10000,
+      "count": 1
+    },
+    {
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "yearMonth": "2026-06",
+      "categoryId": null,
+      "type": "invoice_payment",
+      "status": "canceled",
+      "totalCents": 10000,
+      "count": 1
+    },
+    {
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "yearMonth": "2026-07",
+      "categoryId": "68cdc581-0d21-4f1c-b00f-11719f2673bd",
+      "type": "credit_card_purchase",
+      "status": "canceled",
+      "totalCents": 16534,
+      "count": 1
+    },
+    {
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "yearMonth": "2026-07",
+      "categoryId": null,
+      "type": "credit_card_purchase",
+      "status": "canceled",
+      "totalCents": 10000,
+      "count": 1
+    },
+    {
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "yearMonth": "2026-07",
+      "categoryId": null,
+      "type": "invoice_payment",
+      "status": "canceled",
+      "totalCents": 10000,
+      "count": 1
+    },
+    {
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "yearMonth": "2026-08",
+      "categoryId": null,
+      "type": "credit_card_purchase",
+      "status": "canceled",
+      "totalCents": 10000,
+      "count": 1
+    },
+    {
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "yearMonth": "2026-08",
+      "categoryId": null,
+      "type": "invoice_payment",
+      "status": "canceled",
+      "totalCents": 10000,
+      "count": 1
+    }
+  ],
+  "transactionMix": [
+    {
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "type": "credit_card_purchase",
+      "status": "canceled",
+      "count": 7,
+      "totalCents": 66828
+    },
+    {
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "type": "invoice_payment",
+      "status": "canceled",
+      "count": 3,
+      "totalCents": 30000
+    }
+  ],
+  "rowHash": "af1ff4afdca9763ff572021baf8f22ccd2626c8beef2470dac23b5da40de0845"
+}

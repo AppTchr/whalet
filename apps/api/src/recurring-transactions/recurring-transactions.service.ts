@@ -67,10 +67,10 @@ interface RawTransaction {
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Max occurrences to generate per template (hard cap). */
-const MAX_GENERATION_CAP = 60;
-/** Generate occurrences this many months ahead. */
-const HORIZON_MONTHS = 12;
+/** Max occurrences to generate per template (hard safety ceiling). */
+const MAX_GENERATION_CAP = 240;
+/** Fallback horizon in months, used only when endDate is not provided. */
+const FALLBACK_HORIZON_MONTHS = 60;
 
 // ---------------------------------------------------------------------------
 // Service
@@ -466,6 +466,10 @@ export class RecurringTransactionsService {
   /**
    * Compute an array of occurrence dates starting from `startDate`,
    * respecting frequency, endDate, maxOccurrences, and the hard cap.
+   *
+   * When `endDate` is provided, generates all occurrences up to that date
+   * (bounded by the hard safety ceiling). When not provided, falls back to
+   * a generous horizon so open-ended templates stay usable.
    */
   computeOccurrenceDates(
     startDate: Date,
@@ -473,10 +477,14 @@ export class RecurringTransactionsService {
     endDate: Date | null,
     maxOccurrences: number | null,
   ): Date[] {
-    const horizon = new Date(startDate);
-    horizon.setMonth(horizon.getMonth() + HORIZON_MONTHS);
+    let effectiveEnd: Date;
+    if (endDate) {
+      effectiveEnd = endDate;
+    } else {
+      effectiveEnd = new Date(startDate);
+      effectiveEnd.setMonth(effectiveEnd.getMonth() + FALLBACK_HORIZON_MONTHS);
+    }
 
-    const effectiveEnd = endDate && endDate < horizon ? endDate : horizon;
     const effectiveCap = Math.min(
       maxOccurrences ?? MAX_GENERATION_CAP,
       MAX_GENERATION_CAP,

@@ -23,7 +23,13 @@
       "Bash(pnpm --filter @whalet/web exec tsc --noEmit)",
       "Bash(pnpm --filter @ledger/api build)",
       "Bash(pnpm --filter ./apps/api build)",
-      "Bash(pnpm --filter ./apps/web exec tsc --noEmit)"
+      "Bash(pnpm --filter ./apps/web exec tsc --noEmit)",
+      "Bash(find /home/anderson/apps/ledger/apps/web -type f \\\\\\( -name \"*.tsx\" -o -name \"*.ts\" \\\\\\) -exec grep -l \"creditLimitCents\\\\|edit.*card\\\\|card.*edit\" {} \\\\;)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"exit=$?\")",
+      "Read(//tmp/**)",
+      "Bash(pnpm recon:snapshot pre-fase-0)",
+      "Bash(npx prisma *)"
     ],
     "deny": [
       "Bash(rm -rf /)",
@@ -56,5 +62,5 @@
       "/home/anderson/apps/whalet/apps/web/src/app/(protected)/wallets/[id]"
     ]
   },
-  "defaultMode": "acceptEdits"
+  "defaultMode": "auto"
 }

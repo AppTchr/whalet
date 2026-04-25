@@ -8,7 +8,7 @@ export default function AppLayout({
 }) {
   return (
     <AuthProvider>
-      <div className="flex h-screen overflow-hidden bg-neutral-background">
+      <div className="flex h-screen overflow-hidden bg-transparent">
         <Sidebar />
         {/* On mobile, add top padding to clear the fixed header bar */}
         <main className="flex-1 overflow-y-auto pt-14 md:pt-0">

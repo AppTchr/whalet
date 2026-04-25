@@ -75,17 +75,25 @@ export class FaturasService {
       orderBy: { closingDate: 'desc' },
     });
 
-    // Compute totals in bulk (one query for all faturas)
+    // Fase 3 cutover: totals are now computed from Transaction rows
+    // (type=credit_card_purchase). Installment is still written to in dual-write
+    // mode but is no longer the source of truth for reads.
     const faturaIds = faturas.map((f) => f.id);
-    const totals = await this.prisma.installment.groupBy({
+    const totals = await this.prisma.transaction.groupBy({
       by: ['faturaId'],
       where: {
         faturaId: { in: faturaIds },
-        status: { not: 'canceled' },
+        type: TransactionType.credit_card_purchase,
+        status: { not: TransactionStatus.canceled },
+        deletedAt: null,
       },
-      _sum: { amountCents: true },
+      _sum: { amount: true },
     });
-    const totalMap = new Map(totals.map((t) => [t.faturaId, t._sum.amountCents ?? 0]));
+    const totalMap = new Map(
+      totals
+        .filter((t): t is typeof t & { faturaId: string } => t.faturaId !== null)
+        .map((t) => [t.faturaId, Math.round(Number(t._sum.amount ?? 0) * 100)]),
+    );
 
     const today = todayUTC();
 
@@ -93,7 +101,7 @@ export class FaturasService {
       id: f.id,
       cardId: f.cardId,
       walletId: f.walletId,
-      categoryId: f.categoryId,
+      categoryId: null,
       referenceMonth: f.referenceMonth,
       closingDate: f.closingDate,
       dueDate: f.dueDate,
@@ -118,41 +126,48 @@ export class FaturasService {
 
     const fatura = await this.prisma.fatura.findFirst({
       where: { id, cardId, walletId },
+    });
+    if (!fatura) throw new NotFoundException('FATURA_NOT_FOUND');
+
+    // Fase 3 cutover: items come from Transaction (type=credit_card_purchase).
+    const txs = await this.prisma.transaction.findMany({
+      where: {
+        faturaId: id,
+        type: TransactionType.credit_card_purchase,
+        status: { not: TransactionStatus.canceled },
+        deletedAt: null,
+      },
+      orderBy: [{ dueDate: 'asc' }, { installmentNumber: 'asc' }],
       include: {
-        installments: {
-          where: { status: { not: 'canceled' } },
-          include: {
-            purchase: {
-              select: { description: true, installmentCount: true, categoryId: true },
-            },
-          },
-          orderBy: { installmentNumber: 'asc' },
-        },
+        purchase: { select: { description: true, installmentCount: true } },
       },
     });
 
-    if (!fatura) throw new NotFoundException('FATURA_NOT_FOUND');
-
-    const totalCents = fatura.installments.reduce((sum, i) => sum + i.amountCents, 0);
+    const totalCents = txs.reduce(
+      (sum, t) => sum + Math.round(Number(t.amount) * 100),
+      0,
+    );
     const today = todayUTC();
 
-    const installmentDtos: FaturaInstallmentDto[] = fatura.installments.map((i) => ({
-      id: i.id,
-      purchaseId: i.purchaseId,
-      purchaseDescription: i.purchase.description,
-      installmentNumber: i.installmentNumber,
-      totalInstallments: i.purchase.installmentCount,
-      amountCents: i.amountCents,
-      dueDate: i.dueDate,
-      status: i.status,
-      categoryId: i.purchase.categoryId,
+    const installmentDtos: FaturaInstallmentDto[] = txs.map((t) => ({
+      id: t.id,
+      purchaseId: t.purchaseId ?? '',
+      purchaseDescription:
+        t.purchase?.description ?? t.description ?? '',
+      installmentNumber: t.installmentNumber ?? 1,
+      totalInstallments:
+        t.totalInstallments ?? t.purchase?.installmentCount ?? 1,
+      amountCents: Math.round(Number(t.amount) * 100),
+      dueDate: t.dueDate,
+      status: t.status,
+      categoryId: t.categoryId,
     }));
 
     return {
       id: fatura.id,
       cardId: fatura.cardId,
       walletId: fatura.walletId,
-      categoryId: fatura.categoryId,
+      categoryId: null,
       referenceMonth: fatura.referenceMonth,
       closingDate: fatura.closingDate,
       dueDate: fatura.dueDate,
@@ -197,12 +212,10 @@ export class FaturasService {
         const [lockedFatura] = await tx.$queryRaw<Array<{
           id: string;
           invoicePaymentTxId: string | null;
-          projectedTxId: string | null;
           closingDate: Date;
           dueDate: Date;
-          categoryId: string | null;
         }>>(
-          Prisma.sql`SELECT id, "invoicePaymentTxId", "projectedTxId", "closingDate", "dueDate", "categoryId" FROM faturas WHERE id = ${faturaId} AND "cardId" = ${cardId} AND "walletId" = ${walletId} FOR UPDATE`,
+          Prisma.sql`SELECT id, "invoicePaymentTxId", "closingDate", "dueDate" FROM faturas WHERE id = ${faturaId} AND "cardId" = ${cardId} AND "walletId" = ${walletId} FOR UPDATE`,
         );
 
         if (!lockedFatura) throw new NotFoundException('FATURA_NOT_FOUND');
@@ -210,28 +223,20 @@ export class FaturasService {
           throw new UnprocessableEntityException('FATURA_ALREADY_PAID');
         }
 
-        // Compute total inside the lock — consistent with installment state
-        const agg = await tx.installment.aggregate({
-          where: { faturaId, status: { not: 'canceled' } },
-          _sum: { amountCents: true },
+        // Compute total inside the lock from the unified Transaction source.
+        const agg = await tx.transaction.aggregate({
+          where: {
+            faturaId,
+            type: TransactionType.credit_card_purchase,
+            status: { not: TransactionStatus.canceled },
+            deletedAt: null,
+          },
+          _sum: { amount: true },
         });
-        const totalCents = agg._sum.amountCents ?? 0;
+        const totalCents = Math.round(Number(agg._sum.amount ?? 0) * 100);
 
         if (totalCents === 0) {
           throw new UnprocessableEntityException('FATURA_NOTHING_TO_PAY');
-        }
-
-        // Cancel the projected transaction (if any) before creating the real payment tx.
-        // The real paid invoice_payment transaction replaces the projected obligation.
-        if (lockedFatura.projectedTxId !== null) {
-          await tx.transaction.update({
-            where: { id: lockedFatura.projectedTxId },
-            data: { status: TransactionStatus.canceled },
-          });
-          await tx.fatura.update({
-            where: { id: faturaId },
-            data: { projectedTxId: null },
-          });
         }
 
         const amountDecimal = totalCents / 100;
@@ -250,7 +255,6 @@ export class FaturasService {
             dueDate: lockedFatura.dueDate,
             paidAt,
             bankAccountId: dto.bankAccountId,
-            ...(lockedFatura.categoryId !== null && { categoryId: lockedFatura.categoryId }),
           },
         });
 
@@ -261,12 +265,16 @@ export class FaturasService {
           data: { invoicePaymentTxId: txRecord.id, paidAt },
         });
 
-        await tx.installment.updateMany({
-          where: { faturaId, status: 'pending' },
-          data: { status: 'paid', paidAt },
+        // Mark each installment-Transaction as paid in lockstep with the fatura.
+        await tx.transaction.updateMany({
+          where: {
+            faturaId,
+            type: TransactionType.credit_card_purchase,
+            status: TransactionStatus.pending,
+          },
+          data: { status: TransactionStatus.paid, paidAt },
         });
 
-        // Return total for the response (captured from inside the tx)
         return totalCents;
       });
     } catch (e: unknown) {
@@ -277,109 +285,71 @@ export class FaturasService {
       throw e;
     }
 
-    // Re-fetch totalCents for the response (outside tx is fine — fatura is now locked/paid)
-    const agg = await this.prisma.installment.aggregate({
-      where: { faturaId, status: { not: 'canceled' } },
-      _sum: { amountCents: true },
+    // Re-fetch totalCents for the response from the unified Transaction source.
+    const agg = await this.prisma.transaction.aggregate({
+      where: {
+        faturaId,
+        type: TransactionType.credit_card_purchase,
+        status: { not: TransactionStatus.canceled },
+        deletedAt: null,
+      },
+      _sum: { amount: true },
     });
 
     return {
       faturaId,
       transactionId: transactionId!,
-      amountCents: agg._sum.amountCents ?? 0,
+      amountCents: Math.round(Number(agg._sum.amount ?? 0) * 100),
       bankAccountId: dto.bankAccountId,
       paidAt,
     };
   }
 
-  // ---------------------------------------------------------------------------
-  // Domain helper: upsert or cancel the projected transaction for a fatura.
-  //
-  // Must be called inside an active Prisma interactive transaction (tx) so that
-  // the projected tx mutation is atomic with the installment mutation that triggered it.
-  //
-  // Rules:
-  //   - If fatura is already paid (invoicePaymentTxId set) → skip (no-op)
-  //   - If sum of non-canceled installments == 0 → cancel existing projected tx (if any)
-  //   - If sum > 0 and projected tx exists → update amount + dueDate
-  //   - If sum > 0 and no projected tx → create a new pending invoice_payment transaction
-  // ---------------------------------------------------------------------------
-  async upsertProjectedTransaction(faturaId: string, tx: PrismaTxClient): Promise<void> {
-    // Fetch fatura with card name (for description) inside the tx context
-    const fatura = await tx.fatura.findUnique({
-      where: { id: faturaId },
-      include: { card: { select: { name: true } } },
-    });
+  async unpay(walletId: string, cardId: string, faturaId: string): Promise<void> {
+    await this.assertCardActive(walletId, cardId);
 
-    if (!fatura) return; // defensive: fatura should exist at call site
+    await this.prisma.$transaction(async (tx) => {
+      const [lockedFatura] = await tx.$queryRaw<Array<{
+        id: string;
+        invoicePaymentTxId: string | null;
+      }>>(
+        Prisma.sql`SELECT id, "invoicePaymentTxId" FROM faturas WHERE id = ${faturaId} AND "cardId" = ${cardId} AND "walletId" = ${walletId} FOR UPDATE`,
+      );
 
-    // If already paid, the projected tx was already canceled in pay() — nothing to do
-    if (fatura.invoicePaymentTxId !== null) return;
-
-    // Compute current non-canceled installment total
-    const agg = await tx.installment.aggregate({
-      where: { faturaId, status: { not: 'canceled' } },
-      _sum: { amountCents: true },
-    });
-    const totalCents = agg._sum.amountCents ?? 0;
-
-    if (totalCents === 0) {
-      // No obligation — cancel and unlink any existing projected transaction
-      if (fatura.projectedTxId !== null) {
-        await tx.transaction.update({
-          where: { id: fatura.projectedTxId },
-          data: { status: TransactionStatus.canceled },
-        });
-        await tx.fatura.update({
-          where: { id: faturaId },
-          data: { projectedTxId: null },
-        });
+      if (!lockedFatura) throw new NotFoundException('FATURA_NOT_FOUND');
+      if (lockedFatura.invoicePaymentTxId === null) {
+        throw new UnprocessableEntityException('FATURA_NOT_PAID');
       }
-      return;
-    }
 
-    const amountDecimal = totalCents / 100;
-    const description = `Fatura ${fatura.card.name} ${fatura.referenceMonth}`;
-
-    if (fatura.projectedTxId !== null) {
-      // Projected tx already exists — update the amount, dueDate, description, and categoryId
-      await tx.transaction.update({
-        where: { id: fatura.projectedTxId },
-        data: {
-          amount: amountDecimal,
-          dueDate: fatura.dueDate,
-          description,
-          categoryId: fatura.categoryId ?? null,
-          // Ensure status is pending in case it was previously canceled then a purchase re-added
-          status: TransactionStatus.pending,
-        },
-      });
-    } else {
-      // No projected tx yet — create one and link it to the fatura
-      const projectedTx = await tx.transaction.create({
-        data: {
-          walletId: fatura.walletId,
-          type: TransactionType.invoice_payment,
-          status: TransactionStatus.pending,
-          amount: amountDecimal,
-          sign: -1,
-          description,
-          dueDate: fatura.dueDate,
-          ...(fatura.categoryId !== null && { categoryId: fatura.categoryId }),
-        },
-      });
+      const paymentTxId = lockedFatura.invoicePaymentTxId;
 
       await tx.fatura.update({
         where: { id: faturaId },
-        data: { projectedTxId: projectedTx.id },
+        data: { invoicePaymentTxId: null, paidAt: null },
       });
-    }
+
+      // Revert each installment-Transaction back to pending.
+      await tx.transaction.updateMany({
+        where: {
+          faturaId,
+          type: TransactionType.credit_card_purchase,
+          status: TransactionStatus.paid,
+        },
+        data: { status: TransactionStatus.pending, paidAt: null },
+      });
+
+      await tx.transaction.update({
+        where: { id: paymentTxId },
+        data: { deletedAt: new Date() },
+      });
+    });
   }
 
   // ---------------------------------------------------------------------------
-  // Update the category assigned to a fatura.
-  // Also propagates the change to the projected transaction and (if paid) to
-  // the actual payment transaction so the dashboard breakdown stays consistent.
+  // Bulk-apply a category to every credit_card_purchase Transaction in a fatura.
+  // Replaces the legacy `Fatura.categoryId` mechanism — categories now live on
+  // each Transaction directly. Useful when the user wants to recategorize an
+  // entire fatura at once (e.g. travel month, business reimbursable, etc.).
   // ---------------------------------------------------------------------------
   async updateCategory(
     walletId: string,
@@ -394,7 +364,6 @@ export class FaturasService {
     });
     if (!fatura) throw new NotFoundException('FATURA_NOT_FOUND');
 
-    // Validate that the category (when provided) belongs to this wallet
     if (dto.categoryId !== null) {
       const category = await this.prisma.category.findFirst({
         where: { id: dto.categoryId, walletId },
@@ -404,31 +373,15 @@ export class FaturasService {
 
     const categoryId = dto.categoryId ?? null;
 
-    await this.prisma.$transaction(async (tx) => {
-      // Update the fatura itself
-      await tx.fatura.update({
-        where: { id: faturaId },
-        data: { categoryId },
-      });
-
-      // Sync the projected transaction (pending obligation)
-      if (fatura.projectedTxId !== null) {
-        await tx.transaction.update({
-          where: { id: fatura.projectedTxId },
-          data: { categoryId },
-        });
-      }
-
-      // Sync the real payment transaction (already paid faturas — retroactive consistency)
-      if (fatura.invoicePaymentTxId !== null) {
-        await tx.transaction.update({
-          where: { id: fatura.invoicePaymentTxId },
-          data: { categoryId },
-        });
-      }
+    await this.prisma.transaction.updateMany({
+      where: {
+        faturaId,
+        type: TransactionType.credit_card_purchase,
+        deletedAt: null,
+      },
+      data: { categoryId },
     });
 
-    // Re-fetch fresh state to build response
     return this.findOne(walletId, cardId, faturaId);
   }
 

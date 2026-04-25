@@ -6,6 +6,7 @@ import {
   createTransaction,
   updateTransaction,
   payTransaction,
+  unpayTransaction,
   cancelTransaction,
   deleteTransaction,
 } from "@/services/transactions.service";
@@ -68,6 +69,17 @@ export function usePayTransaction(walletId: string) {
   const queryClient = useQueryClient();
   return useMutation<Transaction, Error, { id: string; paidAt?: string }>({
     mutationFn: ({ id, paidAt }) => payTransaction(walletId, id, paidAt),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["transactions", walletId] });
+      queryClient.invalidateQueries({ queryKey: ["wallets"] });
+    },
+  });
+}
+
+export function useUnpayTransaction(walletId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<Transaction, Error, string>({
+    mutationFn: (id) => unpayTransaction(walletId, id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions", walletId] });
       queryClient.invalidateQueries({ queryKey: ["wallets"] });

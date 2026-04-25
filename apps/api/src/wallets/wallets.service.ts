@@ -254,8 +254,13 @@ export class WalletsService {
         this.prisma.walletMember.count({
           where: { userId: wallet.ownerUserId, role: 'owner', status: 'active' },
         }),
-        this.prisma.installment.count({
-          where: { walletId, status: 'pending' },
+        this.prisma.transaction.count({
+          where: {
+            walletId,
+            type: 'credit_card_purchase',
+            status: 'pending',
+            deletedAt: null,
+          },
         }),
         this.prisma.fatura.count({
           where: { walletId, invoicePaymentTxId: null },
@@ -327,7 +332,6 @@ export class WalletsService {
         data: { invoicePaymentTxId: null },
       });
 
-      await tx.installment.deleteMany({ where: { walletId } });
       await tx.creditCardPurchase.deleteMany({ where: { walletId } });
       await tx.fatura.deleteMany({ where: { walletId } });
       await tx.transaction.deleteMany({ where: { walletId } });
@@ -422,7 +426,13 @@ export class WalletsService {
     const rangeEnd = new Date(Date.UTC(rangeToYear, rangeToMonth, 1)); // exclusive upper bound
 
     const INCOME_TYPES = ['income', 'transfer_in', 'credit_card_refund'] as const;
+    // Flow types: cash that actually moves the bank account. invoice_payment is
+    // included because that's when the card debt becomes a real cash outflow.
     const EXPENSE_TYPES = ['expense', 'invoice_payment', 'transfer_out'] as const;
+    // Spending-by-category types (Fase 3): each card purchase is the categorized
+    // event (not the aggregated invoice_payment). Excluding invoice_payment here
+    // avoids double-counting (purchase + payment of the fatura that contains it).
+    const SPENDING_TYPES = ['expense', 'credit_card_purchase'] as const;
 
     // ── Summary month: first month of range ──────────────────────────────────
     const summaryMonthStart = new Date(Date.UTC(rangeFromYear, rangeFromMonth - 1, 1));
@@ -439,53 +449,69 @@ export class WalletsService {
     // Fetch all relevant transactions once; aggregate in memory.
     // `projected` bucket keys by dueDate and includes anything not canceled.
     // `confirmed` bucket keys by paidAt and requires status=paid.
-    const [projectedIncomes, projectedExpenses, confirmedIncomes, confirmedExpenses] =
-      await Promise.all([
-        this.prisma.transaction.findMany({
-          where: {
-            walletId,
-            deletedAt: null,
-            status: { not: 'canceled' },
-            sign: 1,
-            type: { in: [...INCOME_TYPES] },
-            dueDate: { gte: windowStart, lt: windowEnd },
-          },
-          select: { amount: true, dueDate: true },
-        }),
-        this.prisma.transaction.findMany({
-          where: {
-            walletId,
-            deletedAt: null,
-            status: { not: 'canceled' },
-            sign: -1,
-            type: { in: [...EXPENSE_TYPES] },
-            dueDate: { gte: windowStart, lt: windowEnd },
-          },
-          select: { amount: true, dueDate: true, categoryId: true },
-        }),
-        this.prisma.transaction.findMany({
-          where: {
-            walletId,
-            deletedAt: null,
-            status: 'paid',
-            sign: 1,
-            type: { in: [...INCOME_TYPES] },
-            paidAt: { gte: windowStart, lt: windowEnd },
-          },
-          select: { amount: true, paidAt: true },
-        }),
-        this.prisma.transaction.findMany({
-          where: {
-            walletId,
-            deletedAt: null,
-            status: 'paid',
-            sign: -1,
-            type: { in: [...EXPENSE_TYPES] },
-            paidAt: { gte: windowStart, lt: windowEnd },
-          },
-          select: { amount: true, paidAt: true },
-        }),
-      ]);
+    const [
+      projectedIncomes,
+      projectedExpenses,
+      confirmedIncomes,
+      confirmedExpenses,
+      spendingByCategory,
+    ] = await Promise.all([
+      this.prisma.transaction.findMany({
+        where: {
+          walletId,
+          deletedAt: null,
+          status: { not: 'canceled' },
+          sign: 1,
+          type: { in: [...INCOME_TYPES] },
+          dueDate: { gte: windowStart, lt: windowEnd },
+        },
+        select: { amount: true, dueDate: true },
+      }),
+      this.prisma.transaction.findMany({
+        where: {
+          walletId,
+          deletedAt: null,
+          status: { not: 'canceled' },
+          sign: -1,
+          type: { in: [...EXPENSE_TYPES] },
+          dueDate: { gte: windowStart, lt: windowEnd },
+        },
+        select: { amount: true, dueDate: true, categoryId: true },
+      }),
+      this.prisma.transaction.findMany({
+        where: {
+          walletId,
+          deletedAt: null,
+          status: 'paid',
+          sign: 1,
+          type: { in: [...INCOME_TYPES] },
+          paidAt: { gte: windowStart, lt: windowEnd },
+        },
+        select: { amount: true, paidAt: true },
+      }),
+      this.prisma.transaction.findMany({
+        where: {
+          walletId,
+          deletedAt: null,
+          status: 'paid',
+          sign: -1,
+          type: { in: [...EXPENSE_TYPES] },
+          paidAt: { gte: windowStart, lt: windowEnd },
+        },
+        select: { amount: true, paidAt: true },
+      }),
+      // Fase 3: spending-by-category source (no sign filter — credit_card_purchase has sign=0).
+      this.prisma.transaction.findMany({
+        where: {
+          walletId,
+          deletedAt: null,
+          status: { not: 'canceled' },
+          type: { in: [...SPENDING_TYPES] },
+          dueDate: { gte: windowStart, lt: windowEnd },
+        },
+        select: { amount: true, dueDate: true, categoryId: true },
+      }),
+    ]);
 
     const sumIn = <T extends { amount: Decimal }>(txs: T[], pred: (t: T) => boolean): number =>
       txs.reduce((s, t) => (pred(t) ? s + Number(t.amount) : s), 0);
@@ -507,8 +533,10 @@ export class WalletsService {
     const currentMonthFlow = computeFlow(summaryMonthStart, summaryMonthEnd);
     const currentYearFlow = computeFlow(yearStart, yearEnd);
 
-    // ── Category breakdown (range, projected expenses by dueDate) ────────────
-    const expenseTxsInRange = projectedExpenses.filter((t) =>
+    // ── Category breakdown (range, spending events by dueDate) ────────────────
+    // Uses SPENDING_TYPES (expense + credit_card_purchase) — each card purchase
+    // contributes to its OWN category, replacing the old fatura-aggregate view.
+    const expenseTxsInRange = spendingByCategory.filter((t) =>
       inRange(t.dueDate, rangeStart, rangeEnd),
     );
 

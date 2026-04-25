@@ -22,10 +22,10 @@ export class BalanceService implements IBalanceService {
       return new Map();
     }
 
-    // Fatura obligations are now represented as pending invoice_payment Transactions
-    // (type=invoice_payment, status=pending, sign=-1) created automatically by FaturasService
-    // whenever installments are added to a fatura. They are already included in projected_sum
-    // through the standard transactions aggregation — no separate subquery is needed.
+    // Each credit-card parcela is its own credit_card_purchase Transaction with
+    // sign=0 (constraint-enforced) — they don't move bank balance directly.
+    // Bank balance is moved only by income/expense/transfer/invoice_payment, all
+    // captured by the t.amount * t.sign aggregation below.
     const rows = await this.prisma.$queryRaw<BalanceRow[]>(Prisma.sql`
       SELECT
         w.id                                                        AS wallet_id,

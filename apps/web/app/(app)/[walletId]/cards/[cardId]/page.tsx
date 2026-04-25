@@ -23,9 +23,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { useCard, useArchiveCard } from "@/lib/hooks/use-cards";
+import { useCard, useArchiveCard, useUpdateCard } from "@/lib/hooks/use-cards";
 import { useWallet } from "@/lib/hooks/use-wallet";
-import { useFaturas, useFatura, usePayFatura, useUpdateFaturaCategory } from "@/lib/hooks/use-faturas";
+import { useFaturas, useFatura, usePayFatura, useUnpayFatura, useUpdateFaturaCategory } from "@/lib/hooks/use-faturas";
 import { usePurchases, useCreatePurchase, useCancelPurchase, useUpdatePurchase, useCancelInstallment } from "@/lib/hooks/use-purchases";
 import { useBankAccounts } from "@/lib/hooks/use-bank-accounts";
 import { useCategories } from "@/lib/hooks/use-categories";
@@ -121,6 +121,7 @@ function FaturaRow({
   canWrite,
   categories,
   onPay,
+  onUnpay,
   index,
 }: {
   fatura: Fatura;
@@ -129,11 +130,13 @@ function FaturaRow({
   canWrite: boolean;
   categories: Category[];
   onPay: (fatura: Fatura) => void;
+  onUnpay: (fatura: Fatura) => void;
   index: number;
 }) {
   const [expanded, setExpanded] = useState(false);
   const statusConfig = getFaturaStatusConfig(fatura.status);
   const canPay = fatura.status !== "paid";
+  const isPaid = fatura.status === "paid";
   const StatusIcon = statusConfig.icon;
 
   const updateCategory = useUpdateFaturaCategory(walletId, cardId);
@@ -231,6 +234,20 @@ function FaturaRow({
               }}
             >
               Pagar
+            </Button>
+          )}
+
+          {isPaid && canWrite && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs h-7 text-amber-700 border-amber-200 hover:bg-amber-50 font-medium"
+              onClick={(e) => {
+                e.stopPropagation();
+                onUnpay(fatura);
+              }}
+            >
+              Desmarcar pago
             </Button>
           )}
 
@@ -586,6 +603,186 @@ function PurchaseRow({
   );
 }
 
+// ─── Edit Card Dialog ─────────────────────────────────────────────────────────
+
+const editCardSchema = z.object({
+  name: z.string().min(1, "Nome é obrigatório"),
+  closingDay: z.number({ coerce: true }).int().min(1).max(28),
+  dueDay: z.number({ coerce: true }).int().min(1).max(28),
+  creditLimitReais: z
+    .union([z.number({ coerce: true }).nonnegative(), z.literal("")])
+    .optional(),
+});
+type EditCardValues = z.infer<typeof editCardSchema>;
+
+function EditCardDialog({
+  walletId,
+  card,
+  open,
+  onOpenChange,
+}: {
+  walletId: string;
+  card: import("@/types/api").CreditCard | null | undefined;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const { mutate: updateCard, isPending } = useUpdateCard(walletId);
+  const form = useForm<EditCardValues>({ resolver: zodResolver(editCardSchema) });
+
+  useEffect(() => {
+    if (card && open) {
+      form.reset({
+        name: card.name,
+        closingDay: card.closingDay,
+        dueDay: card.dueDay,
+        creditLimitReais:
+          card.creditLimitCents !== null ? card.creditLimitCents / 100 : "",
+      });
+    }
+  }, [card, open, form]);
+
+  function onSubmit(values: EditCardValues) {
+    if (!card) return;
+    const creditLimitCents =
+      values.creditLimitReais === "" || values.creditLimitReais === undefined
+        ? null
+        : Math.round(Number(values.creditLimitReais) * 100);
+
+    if (
+      creditLimitCents !== null &&
+      card.usedCreditCents !== null &&
+      creditLimitCents < card.usedCreditCents
+    ) {
+      form.setError("creditLimitReais", {
+        message: `O limite não pode ser menor que o crédito já usado (${formatCurrency(card.usedCreditCents)}).`,
+      });
+      return;
+    }
+
+    updateCard(
+      {
+        cardId: card.id,
+        dto: {
+          name: values.name,
+          closingDay: values.closingDay,
+          dueDay: values.dueDay,
+          creditLimitCents,
+        },
+      },
+      {
+        onSuccess: () => {
+          toast.success("Cartão atualizado.");
+          onOpenChange(false);
+        },
+        onError: (err: unknown) => {
+          const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+          if (msg === "CARD_LIMIT_BELOW_USED_CREDIT") {
+            toast.error("O novo limite é menor que o crédito já em uso.");
+          } else {
+            toast.error("Não foi possível atualizar o cartão.");
+          }
+        },
+      }
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Editar cartão</DialogTitle>
+        </DialogHeader>
+
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <FormField
+              control={form.control}
+              name="name"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Nome do cartão</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Nubank, Itaú..." {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="closingDay"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Dia do fechamento</FormLabel>
+                    <FormControl>
+                      <Input type="number" min={1} max={28} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="dueDay"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Dia do vencimento</FormLabel>
+                    <FormControl>
+                      <Input type="number" min={1} max={28} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <FormField
+              control={form.control}
+              name="creditLimitReais"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Limite de crédito (R$)</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      placeholder="Deixe em branco para remover"
+                      {...field}
+                      value={field.value ?? ""}
+                    />
+                  </FormControl>
+                  {card?.usedCreditCents !== null && card?.usedCreditCents !== undefined && card.usedCreditCents > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Em uso agora: {formatCurrency(card.usedCreditCents)}
+                    </p>
+                  )}
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)}>
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                className="w-full sm:w-auto bg-brand-primary hover:bg-brand-primary/90"
+                disabled={isPending}
+              >
+                {isPending ? "Salvando..." : "Salvar"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CardDetailPage() {
@@ -601,6 +798,7 @@ export default function CardDetailPage() {
 
   const [purchaseDialogOpen, setPurchaseDialogOpen] = useState(false);
   const [editPurchase, setEditPurchase] = useState<CreditCardPurchase | null>(null);
+  const [editCardOpen, setEditCardOpen] = useState(false);
 
   const { data: wallet } = useWallet(walletId);
   const canWrite = wallet?.role === "owner" || wallet?.role === "editor";
@@ -616,6 +814,7 @@ export default function CardDetailPage() {
   const categories = (categoriesRaw ?? []).filter((c) => !c.isArchived);
 
   const payFatura = usePayFatura(walletId, cardId);
+  const unpayFaturaMutation = useUnpayFatura(walletId, cardId);
   const createPurchase = useCreatePurchase(walletId, cardId);
   const cancelPurchase = useCancelPurchase(walletId, cardId);
   const cancelInstallmentMutation = useCancelInstallment(walletId, cardId);
@@ -780,31 +979,44 @@ export default function CardDetailPage() {
               </div>
             )}
 
-            {canWrite && wallet?.role === "owner" && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-slate-400 hover:text-white hover:bg-slate-700 h-7 text-xs gap-1.5 transition-colors"
-                disabled={archiveCard.isPending}
-                onClick={() => {
-                  if (confirm("Arquivar este cartão? Esta ação não pode ser desfeita.")) {
-                    archiveCard.mutate(cardId, {
-                      onSuccess: () => { toast.success("Cartão arquivado."); router.push(`/${walletId}/cards`); },
-                      onError: (err: unknown) => {
-                        const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-                        if (msg === "CARD_HAS_OPEN_FATURAS") {
-                          toast.error("Quite todas as faturas em aberto antes de arquivar o cartão.");
-                        } else {
-                          toast.error("Não foi possível arquivar o cartão.");
-                        }
-                      },
-                    });
-                  }
-                }}
-              >
-                <Archive className="h-3.5 w-3.5" />
-                Arquivar cartão
-              </Button>
+            {canWrite && (
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-slate-400 hover:text-white hover:bg-slate-700 h-7 text-xs gap-1.5 transition-colors"
+                  onClick={() => setEditCardOpen(true)}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Editar
+                </Button>
+                {wallet?.role === "owner" && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-slate-400 hover:text-white hover:bg-slate-700 h-7 text-xs gap-1.5 transition-colors"
+                    disabled={archiveCard.isPending}
+                    onClick={() => {
+                      if (confirm("Arquivar este cartão? Esta ação não pode ser desfeita.")) {
+                        archiveCard.mutate(cardId, {
+                          onSuccess: () => { toast.success("Cartão arquivado."); router.push(`/${walletId}/cards`); },
+                          onError: (err: unknown) => {
+                            const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+                            if (msg === "CARD_HAS_OPEN_FATURAS") {
+                              toast.error("Quite todas as faturas em aberto antes de arquivar o cartão.");
+                            } else {
+                              toast.error("Não foi possível arquivar o cartão.");
+                            }
+                          },
+                        });
+                      }
+                    }}
+                  >
+                    <Archive className="h-3.5 w-3.5" />
+                    Arquivar
+                  </Button>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -870,6 +1082,20 @@ export default function CardDetailPage() {
                   canWrite={canWrite}
                   categories={categories}
                   onPay={handleOpenPayDialog}
+                  onUnpay={(f) => {
+                    if (!confirm("Desmarcar esta fatura como paga? A fatura voltará para 'aberta' e o pagamento será revertido.")) return;
+                    unpayFaturaMutation.mutate(f.id, {
+                      onSuccess: () => toast.success("Fatura desmarcada como paga."),
+                      onError: (err: unknown) => {
+                        const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+                        if (msg === "FATURA_NOT_PAID") {
+                          toast.error("Esta fatura não está marcada como paga.");
+                        } else {
+                          toast.error("Não foi possível desmarcar a fatura.");
+                        }
+                      },
+                    });
+                  }}
                   index={i}
                 />
               ))}
@@ -1162,6 +1388,13 @@ export default function CardDetailPage() {
         categories={categories}
         open={editPurchase !== null}
         onOpenChange={(v) => { if (!v) setEditPurchase(null); }}
+      />
+
+      <EditCardDialog
+        walletId={walletId}
+        card={card}
+        open={editCardOpen}
+        onOpenChange={setEditCardOpen}
       />
     </div>
   );

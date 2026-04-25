@@ -98,8 +98,12 @@ export default function LoginPage() {
   // ─────────────────────────────────────────────────────────────────────────────
 
   return (
-    <Card className="shadow-lg border-neutral-border">
-      <CardHeader className="space-y-1 pb-6">
+    <Card className="overflow-hidden border-border/80 bg-white/92">
+      <div className="border-b border-border/80 px-6 py-3 text-[11px] uppercase tracking-[0.28em] text-muted-foreground" style={{ fontFamily: "var(--font-mono)" }}>
+        Whalet · Acesso
+      </div>
+
+      <CardHeader className="space-y-1 pb-6 pt-8">
         <Image
           src="/icon.png"
           width={400}
@@ -110,19 +114,19 @@ export default function LoginPage() {
 
         {step === "email" ? (
           <>
-            <CardTitle className="text-2xl font-bold -mt-[50px]">
+            <CardTitle className="text-3xl font-medium -mt-[50px] tracking-[-0.02em]">
               Bem-vindo(a) de volta
             </CardTitle>
-            <CardDescription>
+            <CardDescription className="text-[15px] leading-6">
               Informe seu e-mail para receber um código de acesso
             </CardDescription>
           </>
         ) : (
           <>
-            <CardTitle className="text-2xl font-bold">
+            <CardTitle className="text-3xl font-medium tracking-[-0.02em]">
               Verifique seu e-mail
             </CardTitle>
-            <CardDescription>
+            <CardDescription className="text-[15px] leading-6">
               Enviamos um código de 6 dígitos para{" "}
               <span className="font-medium text-foreground">
                 {emailAddress}
@@ -136,10 +140,16 @@ export default function LoginPage() {
         {step === "email" ? (
           <form
             onSubmit={emailForm.handleSubmit(handleEmailSubmit)}
-            className="space-y-4"
+            className="space-y-5"
           >
             <div className="space-y-2">
-              <Label htmlFor="email">E-mail</Label>
+              <Label
+                htmlFor="email"
+                className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground"
+                style={{ fontFamily: "var(--font-mono)" }}
+              >
+                E-mail
+              </Label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -176,14 +186,27 @@ export default function LoginPage() {
                 "Enviar código"
               )}
             </Button>
+
+            <p
+              className="pt-1 text-[11px] uppercase tracking-[0.2em] text-muted-foreground"
+              style={{ fontFamily: "var(--font-mono)" }}
+            >
+              Sem senha · acesso por código
+            </p>
           </form>
         ) : (
           <form
             onSubmit={otpForm.handleSubmit(handleOtpSubmit)}
-            className="space-y-4"
+            className="space-y-5"
           >
             <div className="space-y-2">
-              <Label htmlFor="token">Código de acesso</Label>
+              <Label
+                htmlFor="token"
+                className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground"
+                style={{ fontFamily: "var(--font-mono)" }}
+              >
+                Código de acesso
+              </Label>
               <div className="relative">
                 <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input

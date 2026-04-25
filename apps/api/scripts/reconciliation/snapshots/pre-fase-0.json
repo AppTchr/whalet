@@ -1,0 +1,48 @@
+{
+  "label": "pre-fase-0",
+  "capturedAt": "2026-04-25T03:12:45.256Z",
+  "schemaHints": {
+    "hasInstallmentTable": true,
+    "transactionHasFaturaId": false,
+    "transactionHasPurchaseId": false
+  },
+  "walletBalances": [
+    {
+      "walletId": "5dd067ca-d38b-4e3d-92fb-d5910b8a0b61",
+      "walletName": "Finanças Pessoal",
+      "confirmedCents": 0,
+      "projectedCents": 0
+    },
+    {
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "walletName": "Carteira Profissional",
+      "confirmedCents": 0,
+      "projectedCents": 0
+    }
+  ],
+  "faturaTotals": [
+    {
+      "faturaId": "88e097b7-f693-4a10-b7ba-5258e930ff1d",
+      "cardId": "63d99432-8092-4214-af66-9ca195a0f280",
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "referenceMonth": "2026-05",
+      "invoicePaymentTxId": null,
+      "totalFromInstallmentsCents": 0,
+      "totalFromTxCents": null,
+      "installmentCount": 0
+    },
+    {
+      "faturaId": "a32202d1-7742-4ad8-b196-db42b38aaa6f",
+      "cardId": "63d99432-8092-4214-af66-9ca195a0f280",
+      "walletId": "f9e47146-73fd-473d-9878-5c4f4cb8f87d",
+      "referenceMonth": "2026-06",
+      "invoicePaymentTxId": null,
+      "totalFromInstallmentsCents": 0,
+      "totalFromTxCents": null,
+      "installmentCount": 0
+    }
+  ],
+  "categoryBreakdown": [],
+  "transactionMix": [],
+  "rowHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

@@ -5,6 +5,7 @@ import {
   listFaturas,
   getFatura,
   payFatura,
+  unpayFatura,
   updateFaturaCategory,
   type PayFaturaResponse,
 } from "@/services/faturas.service";
@@ -58,6 +59,19 @@ export function usePayFatura(walletId: string, cardId: string) {
       queryClient.invalidateQueries({
         queryKey: ["wallets"],
       });
+    },
+  });
+}
+
+export function useUnpayFatura(walletId: string, cardId: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: (faturaId) => unpayFatura(walletId, cardId, faturaId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["faturas", walletId, cardId] });
+      queryClient.invalidateQueries({ queryKey: ["transactions", walletId] });
+      queryClient.invalidateQueries({ queryKey: ["cards", walletId] });
+      queryClient.invalidateQueries({ queryKey: ["wallets"] });
     },
   });
 }
