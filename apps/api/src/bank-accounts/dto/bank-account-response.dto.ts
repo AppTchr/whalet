@@ -26,6 +26,12 @@ export class BankAccountResponseDto {
   @ApiProperty({ description: 'Indica se a conta está arquivada' })
   isArchived: boolean;
 
+  @ApiPropertyOptional({
+    description:
+      'Saldo confirmado em centavos: soma de transações pagas (sign × amount) na conta. Não inclui pendentes nem credit_card_purchase.',
+  })
+  balanceCents?: number;
+
   @ApiProperty({ description: 'Data de criação' })
   createdAt: Date;
 

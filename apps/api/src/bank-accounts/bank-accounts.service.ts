@@ -10,7 +10,7 @@ import {
   BankAccountResponseDto,
   BankAccountListResponseDto,
 } from './dto/bank-account-response.dto';
-import { BankAccount } from '@prisma/client';
+import { BankAccount, Prisma } from '@prisma/client';
 
 @Injectable()
 export class BankAccountsService {
@@ -28,10 +28,40 @@ export class BankAccountsService {
       orderBy: { name: 'asc' },
     });
 
+    const balances = await this.computeBalances(accounts.map((a) => a.id));
+
     return {
-      bankAccounts: accounts.map((a) => this.toListDto(a)),
+      bankAccounts: accounts.map((a) => ({
+        ...this.toListDto(a),
+        balanceCents: balances.get(a.id) ?? 0,
+      })),
       total: accounts.length,
     };
+  }
+
+  /**
+   * Confirmed balance per account = Σ (sign × amount) for paid, non-deleted
+   * transactions. credit_card_purchase rows have sign=0 and never affect
+   * the bank balance — invoice_payment is the cash settlement event.
+   */
+  private async computeBalances(
+    accountIds: string[],
+  ): Promise<Map<string, number>> {
+    if (accountIds.length === 0) return new Map();
+    const rows = await this.prisma.$queryRaw<
+      Array<{ id: string; balance: string | null }>
+    >(
+      Prisma.sql`SELECT "bankAccountId" AS id,
+                        COALESCE(SUM(sign::numeric * amount), 0)::text AS balance
+                   FROM transactions
+                  WHERE "bankAccountId" IN (${Prisma.join(accountIds)})
+                    AND status = 'paid'
+                    AND "deletedAt" IS NULL
+                  GROUP BY "bankAccountId"`,
+    );
+    return new Map(
+      rows.map((r) => [r.id, Math.round(Number(r.balance ?? 0) * 100)]),
+    );
   }
 
   async findOne(walletId: string, id: string): Promise<BankAccountResponseDto> {

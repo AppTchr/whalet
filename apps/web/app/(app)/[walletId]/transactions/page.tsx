@@ -138,7 +138,7 @@ const regularSchema = z.object({
   amount: z.coerce.number({ invalid_type_error: "Informe um valor válido" }).positive("O valor deve ser positivo"),
   dueDate: z.string().min(1, "Vencimento é obrigatório"),
   status: z.enum(["pending", "paid"] as const).optional(),
-  bankAccountId: z.string().optional(),
+  bankAccountId: z.string().min(1, "Conta bancária é obrigatória"),
   categoryId: z.string().optional(),
   notes: z.string().optional(),
   // Recurrence fields (optional)
@@ -205,6 +205,21 @@ function CreateTransactionDialog({
   const filteredCategories = categories?.filter(
     (c) => !c.isArchived && (c.type === (paymentType === "income" ? "income" : "expense") || c.type === "any")
   );
+
+  // Default the bank account to the first available one as soon as the list
+  // loads, so the user doesn't have to remember to pick it. Only writes
+  // when the field is empty (preserves manual choices on subsequent renders).
+  const watchedBankAccount = watch("bankAccountId" as never) as unknown as string | undefined;
+  useEffect(() => {
+    if (paymentType === "credit_card_purchase") return;
+    if (!bankAccounts || bankAccounts.length === 0) return;
+    if (!watchedBankAccount) {
+      reset(
+        (prev) => ({ ...prev, bankAccountId: bankAccounts[0].id }) as unknown as CreateFormValues,
+        { keepDirtyValues: true, keepTouched: true },
+      );
+    }
+  }, [bankAccounts, watchedBankAccount, paymentType, reset]);
 
   function handlePaymentTypeChange(val: PaymentType) {
     setPaymentType(val);
@@ -422,26 +437,53 @@ function CreateTransactionDialog({
             </div>
           )}
 
-          {!isCard && bankAccounts && bankAccounts.length > 0 && (
+          {!isCard && (
             <div className="space-y-1.5">
-              <Label>Conta (opcional)</Label>
-              <Controller
-                name={"bankAccountId" as never}
-                control={control}
-                render={({ field }: { field: { value: string; onChange: (v: string) => void } }) => (
-                  <Select value={field.value ?? "none"} onValueChange={(v) => field.onChange(v === "none" ? "" : v)}>
-                    <SelectTrigger className="w-full"><SelectValue placeholder="Sem conta" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Sem conta</SelectItem>
-                      {bankAccounts.map((account) => (
-                        <SelectItem key={account.id} value={account.id}>
-                          {account.name}{account.institution ? ` — ${account.institution}` : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
+              <Label>
+                {paymentType === "income"
+                  ? "Conta de destino"
+                  : "Conta de origem"}
+                <span className="text-destructive ml-0.5">*</span>
+              </Label>
+              {bankAccounts && bankAccounts.length > 0 ? (
+                <Controller
+                  name={"bankAccountId" as never}
+                  control={control}
+                  render={({ field }: { field: { value: string; onChange: (v: string) => void } }) => (
+                    <Select value={field.value ?? ""} onValueChange={field.onChange}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Selecione a conta" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {bankAccounts.map((account) => (
+                          <SelectItem key={account.id} value={account.id}>
+                            <span className="flex items-center justify-between gap-3 w-full">
+                              <span>
+                                {account.name}
+                                {account.institution ? ` — ${account.institution}` : ""}
+                              </span>
+                              {typeof account.balanceCents === "number" && (
+                                <span className="text-xs text-muted-foreground tabular-nums">
+                                  {formatAmount(account.balanceCents / 100, "BRL")}
+                                </span>
+                              )}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              ) : (
+                <p className="text-xs text-muted-foreground py-2 px-3 border rounded-md bg-muted/30">
+                  Crie uma conta bancária nas configurações antes de registrar transações.
+                </p>
+              )}
+              {(errors as { bankAccountId?: { message?: string } }).bankAccountId?.message && (
+                <p className="text-xs text-destructive">
+                  {(errors as { bankAccountId?: { message?: string } }).bankAccountId?.message}
+                </p>
+              )}
             </div>
           )}
 
@@ -912,8 +954,23 @@ function TransferDialog({
   });
 
   const toWalletId = form.watch("toWalletId");
+  const fromBankAccountId = form.watch("fromBankAccountId");
+  const transferAmount = form.watch("amount");
   const { data: toAccountsRaw } = useBankAccounts(toWalletId);
   const toAccounts = toAccountsRaw?.filter((a) => !a.isArchived);
+
+  const fromAccount = fromAccounts?.find((a) => a.id === fromBankAccountId);
+  const fromBalanceCents = fromAccount?.balanceCents ?? 0;
+  const fromBalanceReais = fromBalanceCents / 100;
+  const overdraft =
+    typeof transferAmount === "number" && transferAmount > fromBalanceReais;
+
+  // Pre-select the only account when the wallet has just one.
+  useEffect(() => {
+    if (!open) return;
+    if (!fromAccounts || fromAccounts.length !== 1) return;
+    if (!fromBankAccountId) form.setValue("fromBankAccountId", fromAccounts[0].id);
+  }, [open, fromAccounts, fromBankAccountId, form]);
 
   useEffect(() => {
     if (!open) return;
@@ -990,13 +1047,31 @@ function TransferDialog({
                       <SelectItem value="_none" disabled>Nenhuma conta disponível</SelectItem>
                     ) : fromAccounts.map((a) => (
                       <SelectItem key={a.id} value={a.id}>
-                        {a.name}{a.institution ? ` — ${a.institution}` : ""}
+                        <span className="flex items-center justify-between gap-3 w-full">
+                          <span>
+                            {a.name}
+                            {a.institution ? ` — ${a.institution}` : ""}
+                          </span>
+                          {typeof a.balanceCents === "number" && (
+                            <span className="text-xs text-muted-foreground tabular-nums">
+                              {formatAmount(a.balanceCents / 100, "BRL")}
+                            </span>
+                          )}
+                        </span>
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               )}
             />
+            {fromAccount && (
+              <p className="text-xs text-muted-foreground">
+                Saldo disponível:{" "}
+                <span className="font-medium tabular-nums text-foreground">
+                  {formatAmount(fromBalanceReais, "BRL")}
+                </span>
+              </p>
+            )}
             {form.formState.errors.fromBankAccountId && (
               <p className="text-xs text-destructive">{form.formState.errors.fromBankAccountId.message}</p>
             )}
@@ -1070,11 +1145,38 @@ function TransferDialog({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label htmlFor="transfer-amount">Valor (R$)</Label>
-              <Input id="transfer-amount" type="number" step="0.01" min="0.01" className="w-full" {...form.register("amount")} />
-              {form.formState.errors.amount && (
+              <div className="flex items-baseline justify-between">
+                <Label htmlFor="transfer-amount">Valor (R$)</Label>
+                {fromAccount && fromBalanceReais > 0 && (
+                  <button
+                    type="button"
+                    className="text-xs text-brand-primary hover:underline"
+                    onClick={() =>
+                      form.setValue("amount", fromBalanceReais, {
+                        shouldValidate: true,
+                        shouldDirty: true,
+                      })
+                    }
+                  >
+                    Usar tudo
+                  </button>
+                )}
+              </div>
+              <Input
+                id="transfer-amount"
+                type="number"
+                step="0.01"
+                min="0.01"
+                className={`w-full ${overdraft ? "border-destructive focus-visible:ring-destructive" : ""}`}
+                {...form.register("amount")}
+              />
+              {overdraft ? (
+                <p className="text-xs text-destructive">
+                  Excede o saldo disponível ({formatAmount(fromBalanceReais, "BRL")}).
+                </p>
+              ) : form.formState.errors.amount ? (
                 <p className="text-xs text-destructive">{form.formState.errors.amount.message}</p>
-              )}
+              ) : null}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="transfer-date">Data</Label>
@@ -1111,7 +1213,7 @@ function TransferDialog({
             <Button
               type="submit"
               className="w-full sm:w-auto bg-brand-primary hover:bg-brand-primary/90"
-              disabled={isPending}
+              disabled={isPending || overdraft}
             >
               {isPending ? "Enviando..." : "Transferir"}
             </Button>

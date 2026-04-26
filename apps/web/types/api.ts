@@ -69,6 +69,8 @@ export interface BankAccount {
   institution: string | null;
   accountNumber: string | null;
   isArchived: boolean;
+  /** Confirmed balance in cents — present in list responses. */
+  balanceCents?: number;
   createdAt: string;
   updatedAt: string;
 }
